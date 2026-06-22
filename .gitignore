@@ -1,0 +1,16 @@
+# Private inbox data — never commit
+/kb/*
+!/kb/README.md
+!/kb/_template.md
+/me.md
+/tasks.md
+
+# Node (in case a CLI wrapper is added later)
+node_modules/
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
