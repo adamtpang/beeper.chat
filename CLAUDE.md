@@ -8,8 +8,8 @@ beeper.chat is a **Claude Code skill** that clears the user's Beeper inbox to
 zero each day. There is no build step, no server, no test runner — the
 deliverable is the skill plus its supporting docs and data templates.
 
-The brain is **`.claude/skills/triage/SKILL.md`**. Read it before changing
-behavior. Run it with `/triage`.
+The brain is **`.claude/skills/beeper/SKILL.md`**. Read it before changing
+behavior. Run it with `/beeper`.
 
 ## The one rule
 

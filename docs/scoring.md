@@ -1,7 +1,7 @@
 # Scoring: importance × urgency
 
-This is how `/triage` decides what to show you first. The operative rubric lives
-in `.claude/skills/triage/SKILL.md`; this file is the *why*, with worked examples
+This is how `/beeper` decides what to show you first. The operative rubric lives
+in `.claude/skills/beeper/SKILL.md`; this file is the *why*, with worked examples
 and tuning notes.
 
 ## The model

@@ -1,6 +1,6 @@
 ---
-name: triage
-description: Clear my Beeper inbox to zero. Reads unread chats across every network via the Beeper MCP, ranks them by importance × urgency, surfaces the single most important chat first with a full context bundle (who, one-line summary, person-KB facts, suggested action), drafts replies in my voice, logs tasks, and NEVER sends anything without my explicit OK. Use when I type /triage, "do my beeper", "clear my inbox", "inbox zero", or start my daily message review.
+name: beeper
+description: Clear my Beeper inbox to zero. Reads unread chats across every network via the Beeper MCP, ranks them by importance × urgency, surfaces the single most important chat first with a full context bundle (who, one-line summary, person-KB facts, suggested action), drafts replies in my voice, logs tasks, and NEVER sends anything without my explicit OK. Use when I type /beeper, "do my beeper", "clear my inbox", "inbox zero", or start my daily message review.
 ---
 
 # Beeper triage → inbox zero
@@ -37,7 +37,7 @@ the read/list/search ones (search, list chats, get messages, etc.).
 
 - If no `beeper` tools are connected: stop and tell me to (a) make sure Beeper
   Desktop is running, (b) approve the `beeper` MCP server (it's preconfigured in
-  this repo's `.mcp.json`), then restart `/triage`.
+  this repo's `.mcp.json`), then restart `/beeper`.
 - For each unread chat collect: chat id, network, sender / chat title, the last
   few messages (enough to summarize and draft), timestamp of the latest message,
   and the unread count.

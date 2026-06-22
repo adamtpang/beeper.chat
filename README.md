@@ -22,7 +22,7 @@ yours — the scoring rubric, the context-bundle format, your voice, and a
 per-person knowledge base — and rides on Claude Code + Beeper for the plumbing.
 
 The daily ritual is one command: open Claude Code in this folder and run
-`/triage`.
+`/beeper`.
 
 ## Setup (one time)
 
@@ -41,7 +41,7 @@ The daily ritual is one command: open Claude Code in this folder and run
 ```
 cd beeper.chat
 claude
-> /triage
+> /beeper
 ```
 
 It shows a ranked queue, then walks you through chats top-first. For each one,
@@ -52,7 +52,7 @@ reply with: **send · edit `<note>` · task · skip · archive · next · stop**
 
 | Path | What it is |
 |------|------------|
-| `.claude/skills/triage/SKILL.md` | **The brain.** The full triage workflow, scoring rubric, bundle format, and safety rules. |
+| `.claude/skills/beeper/SKILL.md` | **The brain.** The full triage workflow, scoring rubric, bundle format, and safety rules. |
 | `docs/scoring.md` | The importance × urgency rubric with worked examples + how to tune it. |
 | `kb/` | Per-person knowledge base (one `.md` per contact). Built up as you triage. *Private — gitignored.* |
 | `me.md` | Your voice/profile, used for drafting. *Private — gitignored* (start from `me.template.md`). |
