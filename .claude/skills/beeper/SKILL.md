@@ -165,8 +165,14 @@ Inbox: 3 unread left (skipped). Tasks added to tasks.md.
 Read `me.md` (gitignored, private) for how I write. If it's missing, tell me to
 copy `me.template.md` → `me.md` and fill it in. As a fallback you may *read*
 (never send) a few of my recent sent messages via Beeper to infer tone, but
-confirm the read before drafting. Default to concise, warm, lowercase-ish,
-no corporate filler — but `me.md` overrides this.
+confirm the read before drafting.
+
+Default drafting rules (so replies never read as AI-written):
+- **No em dashes.** Never use "—"; use commas, periods, parentheses, or line breaks.
+- **No emojis** in the message body unless `me.md` says otherwise.
+- **Don't sound needy or AI.** Say the thing, ask plainly, give an easy out. No
+  groveling, over-thanking, corporate filler, or long paragraphs.
+- Concise, warm, lowercase-ish, but `me.md` overrides all of this.
 
 ## Notes
 

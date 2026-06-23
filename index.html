@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>beeper.chat: inbox zero by importance × urgency</title>
+<meta name="description" content="An open-source Claude Code skill that clears your Beeper inbox to zero: it ranks every unread chat by importance × urgency, drafts replies in your voice, and never sends without your OK." />
+<meta name="theme-color" content="#0c0b0a" />
+<!-- Open Graph (for sharing in the community) -->
+<meta property="og:type" content="website" />
+<meta property="og:title" content="beeper.chat: inbox zero by importance × urgency" />
+<meta property="og:description" content="A Claude Code skill that triages your whole Beeper inbox by importance × urgency, drafts replies in your voice, and never sends without your OK." />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="icon" href="data:image/svg+xml,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'&gt;&lt;text y='.9em' font-size='90'&gt;📥&lt;/text&gt;&lt;/svg&gt;" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,500&family=Hanken+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#0c0b0a; --bg2:#131210; --card:#171513;
+    --ink:#efe9df; --muted:#a39c8f; --faint:#6c665b;
+    --line:rgba(239,233,223,.10); --line2:rgba(239,233,223,.06);
+    --signal:#ffb23e;   /* important  */
+    --urgent:#ff5a47;   /* urgent     */
+    --ok:#74d39a;       /* approved   */
+    --noise:#46433c;    /* spam/grey  */
+    --display:"Fraunces",Georgia,serif;
+    --mono:"JetBrains Mono",ui-monospace,monospace;
+    --sans:"Hanken Grotesk",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--bg); color:var(--ink); font-family:var(--sans);
+    line-height:1.55; -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  /* warm glow + grain atmosphere */
+  body::before{
+    content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
+    background:
+      radial-gradient(60rem 40rem at 78% -8%, rgba(255,90,71,.16), transparent 60%),
+      radial-gradient(55rem 38rem at 10% 4%, rgba(255,178,62,.12), transparent 55%);
+  }
+  body::after{
+    content:""; position:fixed; inset:0; z-index:1; pointer-events:none; opacity:.05;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    mix-blend-mode:overlay;
+  }
+  .wrap{max-width:1120px; margin:0 auto; padding:0 28px; position:relative; z-index:2}
+  a{color:inherit}
+  .mono{font-family:var(--mono)}
+
+  /* nav */
+  nav{display:flex; align-items:center; justify-content:space-between; padding:26px 0}
+  .brand{font-family:var(--mono); font-weight:700; font-size:15px; letter-spacing:-.02em; display:flex; align-items:center; gap:9px}
+  .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--signal);box-shadow:0 0 14px var(--signal)}
+  .nav-links{display:flex; gap:26px; font-family:var(--mono); font-size:13px; color:var(--muted)}
+  .nav-links a{text-decoration:none; transition:color .2s} .nav-links a:hover{color:var(--ink)}
+
+  /* hero */
+  .hero{display:grid; grid-template-columns:1.05fr .95fr; gap:56px; align-items:center; padding:54px 0 30px}
+  .eyebrow{font-family:var(--mono); font-size:12px; letter-spacing:.18em; text-transform:uppercase; color:var(--signal); margin-bottom:22px}
+  h1{
+    font-family:var(--display); font-weight:600; font-size:clamp(40px,6.2vw,76px);
+    line-height:.98; letter-spacing:-.02em;
+    font-variation-settings:"opsz" 144,"SOFT" 0,"WONK" 1;
+  }
+  h1 em{font-style:italic; color:var(--signal); font-variation-settings:"opsz" 144,"SOFT" 8,"WONK" 1}
+  .lede{color:var(--muted); font-size:clamp(16px,1.4vw,18.5px); max-width:30em; margin:24px 0 30px}
+  .lede b{color:var(--ink); font-weight:600}
+  .cta{display:flex; gap:14px; flex-wrap:wrap; align-items:center}
+  .btn{font-family:var(--mono); font-size:14px; font-weight:500; text-decoration:none; padding:13px 20px; border-radius:11px; display:inline-flex; gap:9px; align-items:center; transition:transform .15s ease, box-shadow .2s ease, background .2s}
+  .btn.primary{background:var(--signal); color:#231603; box-shadow:0 8px 30px -8px rgba(255,178,62,.6)}
+  .btn.primary:hover{transform:translateY(-2px); box-shadow:0 14px 40px -10px rgba(255,178,62,.75)}
+  .btn.ghost{border:1px solid var(--line); color:var(--ink)}
+  .btn.ghost:hover{border-color:var(--signal); color:var(--signal)}
+  .trust{margin-top:22px; font-family:var(--mono); font-size:12.5px; color:var(--faint); display:flex; align-items:center; gap:9px}
+  .trust .ok{color:var(--ok)}
+
+  /* hero inbox card */
+  .inbox{background:linear-gradient(180deg,var(--card),#100e0c); border:1px solid var(--line); border-radius:18px; padding:16px; box-shadow:0 40px 90px -40px rgba(0,0,0,.8)}
+  .inbox-head{display:flex; justify-content:space-between; align-items:center; font-family:var(--mono); font-size:11.5px; color:var(--faint); padding:6px 8px 14px}
+  .inbox-head .live{display:flex;align-items:center;gap:7px}
+  .inbox-head .live i{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block;animation:blink 2s infinite}
+  .row{display:flex; align-items:center; gap:13px; padding:12px 10px; border-radius:11px; opacity:0; transform:translateY(8px); animation:rise .55s ease forwards}
+  .row .pic{width:30px;height:30px;border-radius:9px;flex:none;display:grid;place-items:center;font-size:14px;background:#241f19}
+  .row .body{min-width:0;flex:1}
+  .row .who{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .row .prev{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--mono)}
+  .score{font-family:var(--mono);font-size:12px;font-weight:700;padding:3px 8px;border-radius:7px;flex:none}
+  .row.signal{background:rgba(255,178,62,.06);border:1px solid rgba(255,178,62,.18)}
+  .row.top{background:rgba(255,90,71,.08);border:1px solid rgba(255,90,71,.3);box-shadow:0 0 0 1px rgba(255,90,71,.06),0 12px 30px -16px rgba(255,90,71,.5)}
+  .row.top .pic{background:rgba(255,90,71,.16)}
+  .score.s-urgent{background:rgba(255,90,71,.16);color:var(--urgent)}
+  .score.s-sig{background:rgba(255,178,62,.14);color:var(--signal)}
+  .score.s-noise{background:rgba(239,233,223,.05);color:var(--faint)}
+  .row.noise{opacity:.42}
+  .row.noise .who,.row.noise .prev{color:var(--faint)}
+  .tag{font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:.1em;color:var(--urgent);border:1px solid rgba(255,90,71,.35);padding:2px 6px;border-radius:5px;margin-left:8px}
+
+  /* stat band */
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line2);border:1px solid var(--line);border-radius:16px;overflow:hidden;margin:36px 0 8px}
+  .stat{background:var(--bg2);padding:26px 24px}
+  .stat .n{font-family:var(--display);font-weight:600;font-size:clamp(28px,3.4vw,40px);letter-spacing:-.02em;line-height:1}
+  .stat .n.amber{color:var(--signal)} .stat .n.red{color:var(--urgent)} .stat .n.green{color:var(--ok)}
+  .stat .l{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:10px}
+
+  /* sections */
+  section{padding:84px 0; position:relative}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--faint);margin-bottom:16px}
+  h2{font-family:var(--display);font-weight:600;font-size:clamp(28px,4vw,46px);letter-spacing:-.02em;line-height:1.02}
+  h2 em{font-style:italic;color:var(--signal)}
+  .sub{color:var(--muted);max-width:34em;margin-top:16px;font-size:16.5px}
+  .divider{height:1px;background:var(--line);border:0}
+
+  /* matrix */
+  .matrix-grid{display:grid;grid-template-columns:auto 1fr;gap:14px;margin-top:46px;align-items:stretch}
+  .yaxis{writing-mode:vertical-rl;transform:rotate(180deg);font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--faint);text-align:center;padding:8px 0}
+  .quad{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:14px;aspect-ratio:16/9}
+  .cell{border:1px solid var(--line);border-radius:14px;padding:20px;display:flex;flex-direction:column;justify-content:space-between;background:var(--bg2);min-height:120px;position:relative;overflow:hidden}
+  .cell .q{font-family:var(--mono);font-size:11px;color:var(--faint)}
+  .cell .t{font-family:var(--display);font-size:22px;font-weight:600}
+  .cell.now{border-color:rgba(255,90,71,.4);background:radial-gradient(40rem 12rem at 80% 120%,rgba(255,90,71,.16),var(--bg2))}
+  .cell.now .t{color:var(--urgent)}
+  .cell.now .pulse{position:absolute;top:16px;right:16px;width:9px;height:9px;border-radius:50%;background:var(--urgent);box-shadow:0 0 0 0 rgba(255,90,71,.6);animation:pulse 2s infinite}
+  .cell.sched .t{color:var(--signal)}
+  .xaxis{font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--faint);text-align:center;margin-top:12px;padding-left:34px}
+
+  /* steps */
+  .steps{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;margin-top:46px}
+  .step{border:1px solid var(--line);border-radius:16px;padding:28px;background:linear-gradient(180deg,var(--bg2),transparent)}
+  .step .num{font-family:var(--mono);font-size:13px;color:var(--signal);font-weight:700}
+  .step h3{font-family:var(--display);font-weight:600;font-size:23px;margin:14px 0 8px;letter-spacing:-.01em}
+  .step p{color:var(--muted);font-size:15px}
+  .step .net{margin-top:14px;display:flex;gap:7px;flex-wrap:wrap}
+  .chip{font-family:var(--mono);font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:20px;padding:4px 10px}
+
+  /* say/do quote */
+  .quote{text-align:center;padding:96px 0}
+  .quote p{font-family:var(--display);font-weight:500;font-style:italic;font-size:clamp(26px,3.6vw,42px);letter-spacing:-.01em;line-height:1.15;max-width:18ch;margin:0 auto}
+  .quote em{color:var(--signal);font-style:italic}
+
+  /* final cta */
+  .final{text-align:center;border:1px solid var(--line);border-radius:24px;padding:64px 32px;margin-bottom:28px;background:radial-gradient(50rem 22rem at 50% -10%,rgba(255,178,62,.12),var(--bg2))}
+  .final h2{margin-bottom:14px}
+  .final .cta{justify-content:center;margin-top:28px}
+
+  footer{border-top:1px solid var(--line);padding:36px 0 60px;display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap;font-family:var(--mono);font-size:12.5px;color:var(--faint)}
+  footer a{color:var(--muted);text-decoration:none} footer a:hover{color:var(--ink)}
+  .rule0{color:var(--ok)}
+
+  /* reveal */
+  html.js .rv{opacity:0;transform:translateY(18px);transition:opacity .7s ease,transform .7s ease}
+  html.js .rv.in{opacity:1;transform:none}
+
+  @keyframes rise{to{opacity:1;transform:none}}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,90,71,.55)}70%{box-shadow:0 0 0 14px rgba(255,90,71,0)}100%{box-shadow:0 0 0 0 rgba(255,90,71,0)}}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}html.js .rv{opacity:1;transform:none}}
+
+  @media(max-width:880px){
+    .hero{grid-template-columns:1fr;gap:38px;padding:30px 0}
+    .stats{grid-template-columns:1fr}
+    .steps{grid-template-columns:1fr}
+    .quad{aspect-ratio:auto}
+    .nav-links a:not(.gh){display:none}
+  }
+</style>
+</head>
+<body>
+<script>document.documentElement.classList.add('js')</script>
+<div class="wrap">
+
+  <nav>
+    <div class="brand"><span class="dot"></span>beeper.chat</div>
+    <div class="nav-links">
+      <a href="#how">how it works</a>
+      <a href="#matrix">the method</a>
+      <a class="gh" href="https://github.com/adamtpang/beeper.chat">GitHub ↗</a>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <header class="hero">
+    <div>
+      <div class="eyebrow">open-source · claude code skill</div>
+      <h1>One inbox.<br>Every network.<br>Ranked by <em>what matters.</em></h1>
+      <p class="lede">beeper.chat reads your unread Beeper chats across <b>every network</b>, ranks them by <b>importance × urgency</b>, drafts replies in <b>your voice</b>, and clears you to zero, <b>without ever sending behind your back.</b></p>
+      <div class="cta">
+        <a class="btn primary" href="https://github.com/adamtpang/beeper.chat">⌘ Get it on GitHub</a>
+        <a class="btn ghost" href="#how">How it works</a>
+      </div>
+      <div class="trust"><span class="ok">●</span> Drafts, never sends. You're always the last click.</div>
+    </div>
+
+    <div class="inbox" aria-hidden="true">
+      <div class="inbox-head"><span>UNREAD · ALL NETWORKS</span><span class="live"><i></i>triaging</span></div>
+      <div class="row top" style="animation-delay:.05s">
+        <div class="pic">📄</div>
+        <div class="body"><div class="who">Sam · contract<span class="tag">DO NOW</span></div><div class="prev">needs sign-off before EOD</div></div>
+        <div class="score s-urgent">25</div>
+      </div>
+      <div class="row signal" style="animation-delay:.15s">
+        <div class="pic">💬</div>
+        <div class="body"><div class="who">Mom</div><div class="prev">can you call today?</div></div>
+        <div class="score s-sig">20</div>
+      </div>
+      <div class="row noise" style="animation-delay:.28s">
+        <div class="pic">🔞</div>
+        <div class="body"><div class="who">Spoil Me Club</div><div class="prev">you've been selected…</div></div>
+        <div class="score s-noise">1</div>
+      </div>
+      <div class="row noise" style="animation-delay:.36s">
+        <div class="pic">🪙</div>
+        <div class="body"><div class="who">Airdrop Bot</div><div class="prev">claim 5000 $PEPE now!!!</div></div>
+        <div class="score s-noise">1</div>
+      </div>
+      <div class="row noise" style="animation-delay:.44s">
+        <div class="pic">📰</div>
+        <div class="body"><div class="who">Newsletter digest</div><div class="prev">12 unread • sale ends tonight ⏰</div></div>
+        <div class="score s-noise">1</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- STATS -->
+  <div class="stats rv">
+    <div class="stat"><div class="n red">100+&nbsp;→&nbsp;2</div><div class="l"># unread vs. # that actually matter</div></div>
+    <div class="stat"><div class="n amber">1 queue</div><div class="l">WhatsApp · iMessage · Signal · Telegram · Discord…</div></div>
+    <div class="stat"><div class="n green">0</div><div class="l">messages sent without your OK</div></div>
+  </div>
+
+  <!-- MATRIX -->
+  <section id="matrix">
+    <div class="kicker rv">the method</div>
+    <h2 class="rv">Not oldest-first. <em>Importance × urgency.</em></h2>
+    <p class="sub rv">Every chat gets two scores from 1–5. Their product (1–25) sets the order, so a partner's one-word text outranks a vendor's "URGENT!!!" blast. Then each is sorted into one move.</p>
+    <div class="matrix-grid rv">
+      <div class="yaxis">importance →</div>
+      <div>
+        <div class="quad">
+          <div class="cell sched"><div class="q">high importance · low urgency</div><div class="t">Schedule</div></div>
+          <div class="cell now"><span class="pulse"></span><div class="q">high importance · high urgency</div><div class="t">Do&nbsp;now</div></div>
+          <div class="cell"><div class="q">low · low</div><div class="t">Archive</div></div>
+          <div class="cell"><div class="q">low importance · high urgency</div><div class="t">Quick reply</div></div>
+        </div>
+        <div class="xaxis">urgency →</div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <!-- HOW -->
+  <section id="how">
+    <div class="kicker rv">how it works</div>
+    <h2 class="rv">Run <span class="mono" style="font-size:.7em">/beeper</span>. Reach zero.</h2>
+    <div class="steps">
+      <div class="step rv">
+        <div class="num">01</div>
+        <h3>Reads everything</h3>
+        <p>Pulls every unread chat across all your networks through the Beeper Desktop MCP, running locally on your machine.</p>
+        <div class="net"><span class="chip">WhatsApp</span><span class="chip">iMessage</span><span class="chip">Signal</span><span class="chip">Telegram</span><span class="chip">Discord</span></div>
+      </div>
+      <div class="step rv">
+        <div class="num">02</div>
+        <h3>Scores &amp; sorts</h3>
+        <p>Rates each chat importance × urgency (1–25) and classifies it: a <b>reply</b> to send, a <b>task</b> to do first, or pure <b>noise</b>.</p>
+      </div>
+      <div class="step rv">
+        <div class="num">03</div>
+        <h3>Surfaces the top one</h3>
+        <p>The most important chat first, as a context bundle: who it's from, the gist, what it knows about them, and a reply drafted in your voice.</p>
+      </div>
+      <div class="step rv">
+        <div class="num">04</div>
+        <h3>You approve</h3>
+        <p>Send, edit, skip, or archive. It never sends, reacts, or archives without your explicit OK, every time.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- QUOTE -->
+  <div class="quote rv">
+    <p>Every chat is a reply to <em>send</em>, or a task to <em>do</em> first.</p>
+  </div>
+
+  <!-- FINAL CTA -->
+  <section style="padding-top:20px">
+    <div class="final rv">
+      <div class="kicker" style="color:var(--signal)">built in public · with the beeper community</div>
+      <h2>Get to inbox zero <em>today.</em></h2>
+      <p class="sub" style="margin:14px auto 0">Clone the skill, point it at Beeper Desktop, and run <span class="mono">/beeper</span>. It's free and open source.</p>
+      <div class="cta">
+        <a class="btn primary" href="https://github.com/adamtpang/beeper.chat">⌘ Get it on GitHub</a>
+        <a class="btn ghost" href="https://github.com/adamtpang/beeper.chat#setup-one-time">Setup guide</a>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span class="rule0">● Rule 0: never sends without your OK</span>
+    <span>Runs locally with Beeper Desktop</span>
+    <span>Made with Claude Code · <a href="https://github.com/adamtpang/beeper.chat">github.com/adamtpang/beeper.chat</a></span>
+  </footer>
+</div>
+
+<script>
+  // progressive scroll-reveal (content is fully visible if JS is off)
+  var io = new IntersectionObserver(function(es){
+    es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target);} });
+  }, {threshold:.16});
+  document.querySelectorAll('.rv').forEach(function(el){ io.observe(el); });
+</script>
+</body>
+</html>
