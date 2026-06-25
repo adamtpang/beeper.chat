@@ -1,0 +1,4 @@
+# Publish only the landing page.
+# Keep the skill, docs, and private data (me.md, tasks.md, kb/) off the web.
+*
+!index.html
