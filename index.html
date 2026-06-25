@@ -169,8 +169,8 @@
   <nav>
     <div class="brand"><span class="dot"></span>beeper.chat</div>
     <div class="nav-links">
+      <a href="#start">get started</a>
       <a href="#how">how it works</a>
-      <a href="#matrix">the method</a>
       <a class="gh" href="https://github.com/adamtpang/beeper.chat">GitHub</a>
     </div>
   </nav>
@@ -277,6 +277,35 @@
     <p>Every chat is a reply to <span class="g">send</span>, or a task to <span class="g">do</span> first.</p>
   </div>
 
+  <section id="start">
+    <div class="kicker rv">get started</div>
+    <h2 class="rv">From install to inbox zero, in <span class="g">4 steps.</span></h2>
+    <div class="steps">
+      <div class="step rv">
+        <div class="num">1</div>
+        <h3>Install</h3>
+        <p>Clone the repo and open it in Claude Code.</p>
+        <div class="install" title="click to copy"><span class="p">$</span><code>git clone https://github.com/adamtpang/beeper.chat &amp;&amp; cd beeper.chat &amp;&amp; claude</code><span class="copied">copied!</span></div>
+        <div class="req">requires Claude Code + Beeper Desktop</div>
+      </div>
+      <div class="step rv">
+        <div class="num">2</div>
+        <h3>Load your Beeper feed</h3>
+        <p>Approve the Beeper MCP so the skill can read your chats across every network, locally on your machine.</p>
+      </div>
+      <div class="step rv">
+        <div class="num">3</div>
+        <h3>Run triage</h3>
+        <p>Run <span class="cmd">/beeper</span>. It ranks every unread chat by importance × urgency and surfaces the most important one first.</p>
+      </div>
+      <div class="step rv">
+        <div class="num">4</div>
+        <h3>Reply to your priority chats</h3>
+        <p>Work the top chats first, with replies drafted in your voice. Nothing sends without your OK.</p>
+      </div>
+    </div>
+  </section>
+
   <section style="padding-top:10px">
     <div class="final rv">
       <div class="kicker">built in public · with the beeper community</div>
@@ -301,8 +330,7 @@
     es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target);} });
   }, {threshold:.16});
   document.querySelectorAll('.rv').forEach(function(el){ io.observe(el); });
-  var inst=document.querySelector('.install');
-  if(inst){inst.addEventListener('click',function(){var t=inst.querySelector('code').textContent;if(navigator.clipboard)navigator.clipboard.writeText(t);inst.classList.add('done');setTimeout(function(){inst.classList.remove('done');},1600);});}
+  document.querySelectorAll('.install').forEach(function(inst){inst.addEventListener('click',function(){var t=inst.querySelector('code').textContent;if(navigator.clipboard)navigator.clipboard.writeText(t);inst.classList.add('done');setTimeout(function(){inst.classList.remove('done');},1600);});});
 </script>
 </body>
 </html>
