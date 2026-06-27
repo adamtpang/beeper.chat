@@ -71,9 +71,9 @@ async function beeper(path, opts = {}) {
 }
 
 async function fetchInbox() {
-  // Pull non-archived chats and a little recent context for each.
-  const chats = await beeper(`/v1/chats?limit=60`);
-  const list = Array.isArray(chats) ? chats : (chats.items || chats.chats || []);
+  // Primary inbox (non-archived, non-low-priority); includes read-but-unreplied.
+  const chats = await beeper(`/v1/chats/search?inbox=primary&limit=40`);
+  const list = chats.items || [];
   const enriched = [];
   for (const c of list.slice(0, 40)) {
     let messages = [];

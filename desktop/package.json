@@ -1,0 +1,10 @@
+{
+  "name": "beeper-chat-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Desktop app for beeper.chat — opens your importance x urgency inbox in its own window.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  }
+}

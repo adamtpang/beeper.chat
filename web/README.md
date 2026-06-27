@@ -25,8 +25,9 @@ can see the UX immediately.
 1. Make sure **Beeper Desktop** is running (it serves the local API on
    `127.0.0.1:23373`).
 2. `cp .env.example .env`
-3. Set `ANTHROPIC_API_KEY`, set `BEEPER_ACCESS_TOKEN` (from Beeper's Desktop API
-   auth), and set `DEMO=0`.
+3. Set `ANTHROPIC_API_KEY`. Get `BEEPER_ACCESS_TOKEN` in Beeper Desktop:
+   Settings -> Integrations -> Approved connections -> + (create a token), then
+   paste it in. Set `DEMO=0`.
 4. `node server.mjs` and click **Run triage**.
 
 ## How it works
@@ -43,8 +44,7 @@ browser UI  ->  local Node proxy (holds your keys)  ->  Beeper local API (read +
 
 ## Status
 
-Demo mode works now. Live mode is wired against the documented Beeper endpoints
-(`/v1/chats`, `/v1/chats/{id}/messages`, `PATCH /v1/chats/{id}`); confirm the
-exact paths + auth for your Beeper version at
-https://developers.beeper.com/desktop-api-reference. Next step: a Tauri shell so
-it opens as a real desktop app.
+Demo mode works now. Live mode uses the confirmed Beeper REST endpoints
+(`GET /v1/chats/search?inbox=primary`, `GET /v1/chats/{id}/messages`,
+`PATCH /v1/chats/{id}` for archive/pin/low-priority) with a Bearer token. A
+desktop wrapper lives in `../desktop` (Electron) so it opens as a real app.
