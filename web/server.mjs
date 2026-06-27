@@ -10,7 +10,7 @@
 
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -37,6 +37,7 @@ const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || '';
 const API_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6';
 const CLI_MODEL = process.env.CLAUDE_MODEL || 'sonnet';
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
+const SNAPSHOT_DIR = process.env.SNAPSHOT_DIR || join(DIR, 'snapshots');
 
 const VOICE = `Write in my voice: casual, mostly lowercase, short. NEVER use em dashes (the "—" character) anywhere; use commas, periods, or separate lines instead. No emojis. Not needy or AI-sounding: say the thing, ask plainly, give the other person an easy out.`;
 
@@ -143,13 +144,49 @@ ${JSON.stringify(chats).slice(0, 90000)}`;
 }
 function parseItems(text) { return JSON.parse(text.slice(text.indexOf('['), text.lastIndexOf(']') + 1)); }
 
+function snapshotMarkdown(items, now) {
+  const stamp = now.toLocaleString();
+  const replies = items.filter((i) => i.type !== 'NOISE');
+  const noise = items.filter((i) => i.type === 'NOISE');
+  const cnt = (re) => items.filter((i) => re.test(i.type)).length;
+  let md = `# beeper.chat triage · ${stamp}\n\n`;
+  md += `${items.length} chats · ${cnt(/REPLY/)} to reply · ${cnt(/TASK/)} tasks · ${noise.length} noise\n\n`;
+  md += `## Tackle first (unreplied, ranked)\n\n`;
+  replies.forEach((it, i) => {
+    md += `${i + 1}. [${it.score}] ${it.who} (${it.network}) · ${it.type}\n`;
+    md += `   ${it.summary || ''}\n`;
+    if (it.nextStep) md += `   Next: ${it.nextStep}\n`;
+    if (it.draft) md += `   Draft: ${it.draft}\n`;
+    md += `\n`;
+  });
+  if (noise.length) {
+    md += `## Noise (archive candidates)\n`;
+    noise.forEach((it) => { md += `- ${it.who} (${it.network})\n`; });
+  }
+  return md;
+}
+
+function writeSnapshot(items) {
+  mkdirSync(SNAPSHOT_DIR, { recursive: true });
+  const now = new Date();
+  const md = snapshotMarkdown(items, now);
+  const file = `triage-${now.toISOString().replace(/[:.]/g, '-').slice(0, 19)}.md`;
+  writeFileSync(join(SNAPSHOT_DIR, file), md);
+  writeFileSync(join(SNAPSHOT_DIR, 'triage-latest.md'), md);
+  return { dir: SNAPSHOT_DIR, file, when: now.toLocaleString() };
+}
+
+function trySnapshot(items) {
+  try { return writeSnapshot(items); } catch (e) { return { error: String(e.message || e) }; }
+}
+
 async function getRankedInbox() {
-  if (DEMO) return { demo: true, items: SAMPLE };
+  if (DEMO) return { demo: true, items: SAMPLE, snapshot: trySnapshot(SAMPLE) };
   if (!BEEPER_TOKEN) throw new Error('Set BEEPER_ACCESS_TOKEN (or keep DEMO=1).');
   if (LLM === 'api' && !ANTHROPIC_KEY) throw new Error('LLM=api needs ANTHROPIC_API_KEY (or use LLM=cli for your subscription).');
   const items = parseItems(await completeText(rankPrompt(await fetchInbox()), 4000));
   items.sort((a, b) => (b.score || 0) - (a.score || 0));
-  return { demo: false, llm: LLM, items };
+  return { demo: false, llm: LLM, items, snapshot: trySnapshot(items) };
 }
 
 // --- draft assistant ---
@@ -210,6 +247,12 @@ const server = createServer(async (req, res) => {
       return send(res, 200, await readFile(join(DIR, 'public', 'index.html'), 'utf8'), 'text/html');
     }
     if (req.method === 'GET' && url.pathname === '/api/inbox') return send(res, 200, await getRankedInbox());
+    if (req.method === 'GET' && url.pathname === '/api/snapshot') {
+      const f = join(SNAPSHOT_DIR, 'triage-latest.md');
+      if (!existsSync(f)) return send(res, 404, { error: 'no snapshot yet' });
+      res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8' });
+      return res.end(readFileSync(f, 'utf8'));
+    }
     if (req.method === 'GET' && url.pathname === '/api/search') {
       if (DEMO || !BEEPER_TOKEN) return send(res, 200, { items: [] });
       return send(res, 200, { items: await searchChats(url.searchParams.get('q') || '') });

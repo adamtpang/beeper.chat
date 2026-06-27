@@ -15,6 +15,7 @@ process.env.PORT = String(PORT);
 // Packaged app: load keys from the user's app-data .env if present, so live mode
 // can be configured without touching the install dir. (Dev reads web/.env.)
 if (app.isPackaged) {
+  process.env.SNAPSHOT_DIR = path.join(app.getPath('userData'), 'snapshots');
   const cfg = path.join(app.getPath('userData'), '.env');
   if (fs.existsSync(cfg)) {
     for (const line of fs.readFileSync(cfg, 'utf8').split('\n')) {

@@ -19,3 +19,6 @@ Thumbs.db
 
 # build output (electron-builder)
 dist/
+
+# triage snapshots (private inbox data)
+snapshots/

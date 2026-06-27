@@ -28,6 +28,8 @@
   .summary{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
   .pill{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:9px 13px;font-size:13px;color:var(--muted)}
   .pill b{color:var(--ink);font-size:15px}
+  .snapnote{font-size:12.5px;color:var(--muted);margin:-2px 0 14px}
+  .snapnote a{color:var(--brand);font-weight:600}
 
   .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:11px}
   .card.top{border-color:rgba(106,75,229,.35);box-shadow:0 12px 26px -22px rgba(106,75,229,.6)}
@@ -81,6 +83,7 @@
   </header>
   <div class="sub">Your inbox, ranked by importance × urgency. Drafts never send on their own.</div>
   <div class="summary" id="summary"></div>
+  <div id="snap"></div>
   <div id="err"></div>
   <div id="list"><div class="state">Click “Run triage” to load your ranked inbox, or use the draft assistant below.</div></div>
 
@@ -123,6 +126,8 @@
       const c = (re) => items.filter(re).length;
       $('#summary').innerHTML = pill(items.length,'chats') + pill(c(i=>/REPLY/.test(i.type)),'to reply')
         + pill(c(i=>/TASK/.test(i.type)),'tasks') + pill(c(i=>i.type==='NOISE'),'noise');
+      $('#snap').innerHTML = (data.snapshot && !data.snapshot.error)
+        ? '<div class="snapnote">Saved a triage snapshot ('+esc(data.snapshot.when)+'). <a href="/api/snapshot" target="_blank">Open the list</a>. Folder: '+esc(data.snapshot.dir)+'</div>' : '';
       $('#list').innerHTML = items.map(card).join('') || '<div class="state">Inbox zero. Nothing to triage.</div>';
     }catch(e){ $('#err').innerHTML = '<div class="err">'+esc(String(e.message||e))+'</div>'; }
     b.disabled = false; b.textContent = 'Refresh';
