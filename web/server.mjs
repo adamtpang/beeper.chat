@@ -3,16 +3,20 @@
 // Run:  node server.mjs   then open  http://localhost:4317
 //
 // A thin local proxy: the browser never sees your keys. The server reads your
-// Beeper inbox from the local Desktop API and asks Claude to rank it by
-// importance x urgency, returning a daily action-item list.
+// Beeper inbox from the local Desktop API and ranks it importance x urgency.
 //
-// Defaults to DEMO mode (sample data) so the UI works with no setup. To go live,
-// copy .env.example -> .env, set ANTHROPIC_API_KEY + BEEPER_ACCESS_TOKEN, and
-// set DEMO=0.
+// Ranking uses your Claude SUBSCRIPTION by default (LLM=cli), via the Claude
+// Code CLI in headless mode — no Anthropic API credits required. Set LLM=api to
+// use a pay-as-you-go ANTHROPIC_API_KEY instead.
+//
+// Defaults to DEMO mode (sample data). To go live: copy .env.example -> .env,
+// set BEEPER_ACCESS_TOKEN, set DEMO=0.
 
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -32,10 +36,12 @@ const PORT = Number(process.env.PORT || 4317);
 const DEMO = process.env.DEMO !== '0';
 const BEEPER_BASE = process.env.BEEPER_API_BASE || 'http://127.0.0.1:23373';
 const BEEPER_TOKEN = process.env.BEEPER_ACCESS_TOKEN || '';
+const LLM = (process.env.LLM || 'cli').toLowerCase(); // 'cli' = your subscription, 'api' = pay-as-you-go key
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || '';
-const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6';
+const API_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6';
+const CLI_MODEL = process.env.CLAUDE_MODEL || 'sonnet';
+const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 
-// Scoring rubric + voice, kept in sync with .claude/skills/beeper/SKILL.md
 const RUBRIC = `Score every chat with importance x urgency.
 importance 1-5: 5 = inner circle / money / health / legal / a promise you made; 1 = newsletters, bots, promos, noise.
 urgency 1-5: 5 = someone waiting now / deadline today / you are blocking others; 1 = pure FYI.
@@ -60,7 +66,7 @@ const SAMPLE = [
 ];
 
 // --- Beeper local API (live mode) ---
-// NOTE: confirm exact paths/params against https://developers.beeper.com/desktop-api-reference
+// Confirm exact paths/params at https://developers.beeper.com/desktop-api-reference
 async function beeper(path, opts = {}) {
   const r = await fetch(`${BEEPER_BASE}${path}`, {
     ...opts,
@@ -83,39 +89,65 @@ async function fetchInbox() {
   return enriched;
 }
 
-// --- Claude ranking ---
-async function rankWithClaude(chats) {
-  const prompt = `${RUBRIC}
+// --- ranking ---
+function rankPrompt(chats) {
+  return `${RUBRIC}
 
-Here are my Beeper chats as JSON. Rank them by score (desc). For each, return:
+Rank my Beeper chats (JSON below) by score, descending. For each return:
 chatId, who, network, importance, urgency, score, type (REPLY | TASK | REPLY+TASK | NOISE),
 summary (one line), nextStep (the concrete next action), draft (a reply in my voice, only if type includes REPLY; else "").
-
 Respond with ONLY a JSON array, no prose.
 
 CHATS:
 ${JSON.stringify(chats).slice(0, 90000)}`;
+}
 
+function parseItems(text) {
+  return JSON.parse(text.slice(text.indexOf('['), text.lastIndexOf(']') + 1));
+}
+
+// Rank via the user's Claude subscription (Claude Code CLI, no API credits).
+function rankWithCli(chats) {
+  return new Promise((resolve, reject) => {
+    const env = { ...process.env };
+    delete env.ANTHROPIC_API_KEY; // force subscription auth instead of the API
+    const args = ['-p', '--output-format', 'json', '--model', CLI_MODEL];
+    const child = spawn(CLAUDE_BIN, args, { env, cwd: tmpdir(), shell: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = '', err = '';
+    child.stdout.on('data', (d) => (out += d));
+    child.stderr.on('data', (d) => (err += d));
+    child.on('error', (e) => reject(new Error(`Could not run "${CLAUDE_BIN}". Is Claude Code installed and logged in? ${e.message}`)));
+    child.on('close', (code) => {
+      if (code !== 0) return reject(new Error(`claude exited ${code}: ${err.slice(0, 400)}`));
+      let result;
+      try { result = JSON.parse(out).result; } catch { return reject(new Error(`Unexpected claude output: ${out.slice(0, 300)}`)); }
+      try { resolve(parseItems(result)); } catch (e) { reject(new Error(`Could not parse ranking JSON: ${e.message}`)); }
+    });
+    child.stdin.write(rankPrompt(chats));
+    child.stdin.end();
+  });
+}
+
+// Rank via the pay-as-you-go Anthropic API (needs ANTHROPIC_API_KEY with credits).
+async function rankWithApi(chats) {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: MODEL, max_tokens: 4000, messages: [{ role: 'user', content: prompt }] }),
+    body: JSON.stringify({ model: API_MODEL, max_tokens: 4000, messages: [{ role: 'user', content: rankPrompt(chats) }] }),
   });
   if (!r.ok) throw new Error(`Anthropic -> ${r.status} ${await r.text().catch(() => '')}`);
   const data = await r.json();
-  const text = (data.content || []).map((b) => b.text || '').join('');
-  const json = text.slice(text.indexOf('['), text.lastIndexOf(']') + 1);
-  return JSON.parse(json);
+  return parseItems((data.content || []).map((b) => b.text || '').join(''));
 }
 
 async function getRankedInbox() {
   if (DEMO) return { demo: true, items: SAMPLE };
-  if (!ANTHROPIC_KEY) throw new Error('Set ANTHROPIC_API_KEY (or keep DEMO=1).');
   if (!BEEPER_TOKEN) throw new Error('Set BEEPER_ACCESS_TOKEN (or keep DEMO=1).');
+  if (LLM === 'api' && !ANTHROPIC_KEY) throw new Error('LLM=api needs ANTHROPIC_API_KEY (or use LLM=cli for your subscription).');
   const chats = await fetchInbox();
-  const items = await rankWithClaude(chats);
+  const items = LLM === 'api' ? await rankWithApi(chats) : await rankWithCli(chats);
   items.sort((a, b) => (b.score || 0) - (a.score || 0));
-  return { demo: false, items };
+  return { demo: false, llm: LLM, items };
 }
 
 async function act(action, chatId) {
@@ -152,6 +184,7 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`beeper.chat web  ->  http://localhost:${PORT}   [${DEMO ? 'DEMO data' : 'LIVE: Beeper + Claude'}]`);
-  if (DEMO) console.log('Demo mode. Copy .env.example -> .env, add keys, set DEMO=0 to go live.');
+  const mode = DEMO ? 'DEMO data' : `LIVE: Beeper + Claude (${LLM === 'api' ? 'API key' : 'subscription'})`;
+  console.log(`beeper.chat web  ->  http://localhost:${PORT}   [${mode}]`);
+  if (DEMO) console.log('Demo mode. Copy .env.example -> .env, add BEEPER_ACCESS_TOKEN, set DEMO=0 to go live.');
 });
