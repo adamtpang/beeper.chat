@@ -1,32 +1,28 @@
-// beeper.chat desktop — a thin Electron wrapper around the local web app.
-// It starts the web/ proxy server, then opens its own window to it. Reuses
-// web/server.mjs and web/.env, so demo mode works out of the box and live mode
-// turns on once web/.env has your keys.
+// beeper.chat desktop — Electron shell.
+// Runs the web/ proxy server IN this process (Electron's own Node) via dynamic
+// import, then opens a window to it. No external `node` needed, so it works the
+// same on every machine. Reuses web/server.mjs and web/.env.
 
 const { app, BrowserWindow } = require('electron');
-const { spawn } = require('node:child_process');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const http = require('node:http');
 
 const PORT = process.env.PORT || 4317;
-const SERVER = path.join(__dirname, '..', 'web', 'server.mjs');
-let server = null;
+process.env.PORT = String(PORT);
 
-function startServer() {
-  // Run the web proxy with system Node (server.mjs is ESM).
-  server = spawn('node', [SERVER], {
-    env: { ...process.env, PORT: String(PORT) },
-    stdio: 'inherit',
-  });
-  server.on('error', (e) => console.error('server spawn error:', e.message));
+async function startServer() {
+  // server.mjs starts an HTTP server on import (it calls listen() at top level).
+  const url = pathToFileURL(path.join(__dirname, '..', 'web', 'server.mjs')).href;
+  await import(url);
 }
 
 function waitForServer(cb, tries = 0) {
   http
-    .get(`http://localhost:${PORT}/`, () => cb())
+    .get(`http://localhost:${PORT}/`, (r) => { r.destroy(); cb(); })
     .on('error', () => {
-      if (tries > 60) return cb(); // give up waiting, load anyway
-      setTimeout(() => waitForServer(cb, tries + 1), 250);
+      if (tries > 80) return cb(); // load anyway after ~16s
+      setTimeout(() => waitForServer(cb, tries + 1), 200);
     });
 }
 
@@ -41,16 +37,14 @@ function createWindow() {
   win.loadURL(`http://localhost:${PORT}/`);
 }
 
-app.whenReady().then(() => {
-  startServer();
+app.whenReady().then(async () => {
+  try { await startServer(); } catch (e) { console.error('server start error:', e); }
   waitForServer(createWindow);
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
-function stopServer() {
-  if (server) { try { server.kill(); } catch {} server = null; }
-}
-app.on('window-all-closed', () => { stopServer(); if (process.platform !== 'darwin') app.quit(); });
-app.on('quit', stopServer);
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
