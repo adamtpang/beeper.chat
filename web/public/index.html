@@ -10,117 +10,225 @@
 <style>
   @font-face{font-family:'Haskoy';font-weight:400 800;font-display:swap;src:url('https://cdn.jsdelivr.net/npm/@fontsource/haskoy/files/haskoy-latin-500-normal.woff2') format('woff2')}
   :root{
-    --bg:#F8F8F8;--card:#FFFFFF;--ink:#1E1E1E;--muted:#5F6368;--faint:#9AA0A6;
+    --bg:#F4F4F7;--card:#FFFFFF;--ink:#1E1E1E;--muted:#5F6368;--faint:#9AA0A6;
     --line:#E6E6EE;--brand:#6A4BE5;--brand-light:#9E7EF8;--grad:linear-gradient(180deg,#9E7EF8,#6A4BE5);
     --blue:#0D4FFB;--dark:#1F1E22;--ok:#1f9d57;
     --font:"Haskoy","Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased}
-  .wrap{max-width:760px;margin:0 auto;padding:28px 20px 80px}
-  header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+  .wrap{max-width:780px;margin:0 auto;padding:26px 18px 60px}
+  header{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
   .brand{font-weight:800;font-size:20px;letter-spacing:-.02em;display:flex;align-items:center;gap:9px}
   .brand .dot{width:11px;height:11px;border-radius:50%;background:var(--grad)}
   .btn{font-weight:700;font-size:13px;border:0;border-radius:999px;padding:11px 18px;cursor:pointer;background:var(--grad);color:#fff;letter-spacing:.02em}
-  .btn:hover{filter:brightness(1.05)} .btn:disabled{opacity:.6;cursor:default}
-  .sub{color:var(--muted);font-size:14px;margin:2px 0 18px}
-  .badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;background:rgba(106,75,229,.1);color:var(--brand);margin-left:8px}
-  .summary{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}
-  .pill{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 14px;font-size:13px;color:var(--muted)}
-  .pill b{color:var(--ink);font-size:16px}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:12px;box-shadow:0 1px 0 rgba(31,30,34,.02)}
-  .card.top{border-color:rgba(106,75,229,.35);box-shadow:0 14px 30px -22px rgba(106,75,229,.6)}
+  .btn:hover{filter:brightness(1.05)} .btn:disabled{opacity:.55;cursor:default}
+  .sub{color:var(--muted);font-size:14px;margin:2px 0 16px}
+  .demoflag{font-size:11px;font-weight:700;color:#9a6b00;background:#fff3d6;border:1px solid #ffe2a8;border-radius:999px;padding:3px 9px;margin-left:8px}
+  .summary{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+  .pill{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:9px 13px;font-size:13px;color:var(--muted)}
+  .pill b{color:var(--ink);font-size:15px}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:11px}
+  .card.top{border-color:rgba(106,75,229,.35);box-shadow:0 12px 26px -22px rgba(106,75,229,.6)}
   .row1{display:flex;align-items:center;gap:10px}
   .score{font-weight:800;font-size:13px;color:#fff;background:var(--brand);border-radius:8px;padding:4px 9px;flex:none}
   .score.noise{background:#C9C9D3}
-  .who{font-weight:700;font-size:16px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .who{font-weight:700;font-size:15.5px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .net{font-size:12px;color:var(--faint)}
   .tag{font-size:10px;font-weight:800;letter-spacing:.06em;padding:3px 7px;border-radius:6px;background:rgba(13,79,251,.1);color:var(--blue)}
   .tag.noise{background:#EEE;color:var(--faint)} .tag.task{background:rgba(106,75,229,.12);color:var(--brand)}
-  .ix{font-size:11px;color:var(--faint);margin-left:2px}
-  .body{color:var(--ink);font-size:14.5px;margin:10px 0 0}
-  .next{color:var(--muted);font-size:13px;margin-top:8px}
-  .next b{color:var(--ink)}
-  .draft{margin-top:10px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:11px 13px;font-size:14px;color:#33323a;white-space:pre-wrap}
-  .acts{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+  .ix{font-size:11px;color:var(--faint);margin:6px 0 0}
+  .body{color:var(--ink);font-size:14.5px;margin:9px 0 0}
+  .next{color:var(--muted);font-size:13px;margin-top:7px}.next b{color:var(--ink)}
+  .draft{margin-top:9px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:14px;white-space:pre-wrap}
+  .acts{display:flex;gap:8px;margin-top:11px;flex-wrap:wrap}
   .act{font-size:12px;font-weight:600;border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 13px;cursor:pointer;color:var(--ink)}
-  .act:hover{border-color:var(--brand);color:var(--brand)}
+  .act:hover{border-color:var(--brand);color:var(--brand)} .act.primary{background:var(--brand);color:#fff;border-color:var(--brand)}
   .act.done{background:var(--ok);color:#fff;border-color:var(--ok)}
-  .state{color:var(--muted);font-size:14px;padding:40px 0;text-align:center}
-  .demoflag{font-size:11px;font-weight:700;color:#9a6b00;background:#fff3d6;border:1px solid #ffe2a8;border-radius:999px;padding:4px 10px}
-  .err{background:#fff0ef;border:1px solid #ffcfca;color:#9b2c22;border-radius:12px;padding:14px;font-size:14px;white-space:pre-wrap}
+  .state{color:var(--muted);font-size:14px;padding:30px 0;text-align:center}
+  .err{background:#fff0ef;border:1px solid #ffcfca;color:#9b2c22;border-radius:12px;padding:13px;font-size:14px;white-space:pre-wrap;margin-bottom:12px}
+
+  /* draft assistant */
+  .assistant{position:sticky;bottom:14px;margin-top:22px;background:var(--card);border:1px solid var(--line);border-radius:18px;box-shadow:0 18px 40px -26px rgba(31,30,34,.5);overflow:hidden}
+  .ahead{display:flex;align-items:center;gap:8px;padding:13px 15px;border-bottom:1px solid var(--line)}
+  .ahead .t{font-weight:800;font-size:14px}
+  .ctx{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .ctxchip{font-size:12px;font-weight:600;color:var(--brand);background:rgba(106,75,229,.1);border-radius:999px;padding:5px 10px;display:inline-flex;gap:7px;align-items:center}
+  .ctxchip .x{cursor:pointer;font-weight:800}
+  .toinput{font-family:var(--font);font-size:12.5px;border:1px solid var(--line);border-radius:999px;padding:6px 11px;width:170px;outline:none}
+  .toinput:focus{border-color:var(--brand)}
+  .results{position:relative}
+  .results .menu{position:absolute;right:0;top:4px;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 30px -18px rgba(31,30,34,.5);overflow:hidden;z-index:5;min-width:200px}
+  .results .menu div{padding:9px 13px;font-size:13px;cursor:pointer}.results .menu div:hover{background:var(--bg)}
+  .results .menu .n{font-size:11px;color:var(--faint)}
+  .msgs{padding:14px 15px;max-height:300px;overflow:auto;display:flex;flex-direction:column;gap:10px}
+  .msg{max-width:88%;font-size:14px;line-height:1.5;padding:10px 13px;border-radius:14px;white-space:pre-wrap}
+  .msg.me{align-self:flex-end;background:var(--grad);color:#fff;border-bottom-right-radius:5px}
+  .msg.bot{align-self:flex-start;background:var(--bg);border:1px solid var(--line);border-bottom-left-radius:5px}
+  .msg .macts{display:flex;gap:7px;margin-top:8px}
+  .hint{color:var(--faint);font-size:12.5px}
+  .inbar{display:flex;gap:9px;padding:12px 13px;border-top:1px solid var(--line)}
+  .inbar input{flex:1;font-family:var(--font);font-size:14px;border:1px solid var(--line);border-radius:999px;padding:11px 15px;outline:none}
+  .inbar input:focus{border-color:var(--brand)}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <div class="brand"><span class="dot"></span>beeper.chat <span id="flag"></span></div>
-    <button class="btn" id="run" onclick="run()">Run triage</button>
+    <button class="btn" id="run" onclick="runTriage()">Run triage</button>
   </header>
   <div class="sub">Your inbox, ranked by importance × urgency. Drafts never send on their own.</div>
   <div class="summary" id="summary"></div>
-  <div id="list"><div class="state">Click “Run triage” to load your ranked inbox.</div></div>
+  <div id="err"></div>
+  <div id="list"><div class="state">Click “Run triage” to load your ranked inbox, or use the draft assistant below.</div></div>
+
+  <!-- draft assistant -->
+  <div class="assistant">
+    <div class="ahead">
+      <span class="t">Draft assistant</span>
+      <div class="ctx" id="ctx">
+        <div class="results">
+          <input class="toinput" id="to" placeholder="reply to (type a name)" autocomplete="off"
+                 onkeydown="if(event.key==='Enter')doSearch()" oninput="scheduleSearch()" />
+          <div id="menu"></div>
+        </div>
+      </div>
+    </div>
+    <div class="msgs" id="msgs"><div class="hint">Tell me who to reply to and what you want to say. Example: pick a name above, then “tell him I’ll confirm tonight.”</div></div>
+    <div class="inbar">
+      <input id="chatin" placeholder="Ask for a draft..." autocomplete="off" onkeydown="if(event.key==='Enter')sendChat()" />
+      <button class="btn" id="chatsend" onclick="sendChat()">Send</button>
+    </div>
+  </div>
 </div>
+
 <script>
   const $ = (s) => document.querySelector(s);
   const esc = (t) => (t || '').replace(/[&<>]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  let ctx = null;          // { id, who, network }
+  let msgs = [];           // [{role, content}]
 
-  async function run(){
-    const btn = $('#run'); btn.disabled = true; btn.textContent = 'Triaging…';
+  // ---------- inbox ----------
+  async function runTriage(){
+    const b = $('#run'); b.disabled = true; b.textContent = 'Triaging…';
+    $('#err').innerHTML = '';
     $('#list').innerHTML = '<div class="state">Reading your inbox and ranking it…</div>';
     try{
-      const res = await fetch('/api/inbox'); const data = await res.json();
+      const data = await (await fetch('/api/inbox')).json();
       if(data.error) throw new Error(data.error);
-      render(data);
-    }catch(e){
-      $('#list').innerHTML = '<div class="err">'+esc(String(e.message||e))+'</div>';
-      $('#summary').innerHTML = '';
-    }
-    btn.disabled = false; btn.textContent = 'Refresh';
-  }
-
-  function render(data){
-    const items = data.items || [];
-    $('#flag').innerHTML = data.demo ? '<span class="demoflag">demo data</span>' : '';
-    const reply = items.filter(i=>/REPLY/.test(i.type)).length;
-    const task = items.filter(i=>/TASK/.test(i.type)).length;
-    const noise = items.filter(i=>i.type==='NOISE').length;
-    $('#summary').innerHTML =
-      pill(items.length,'chats') + pill(reply,'to reply') + pill(task,'tasks') + pill(noise,'noise');
-    $('#list').innerHTML = items.map((it,idx)=>card(it,idx)).join('') || '<div class="state">Inbox zero. Nothing to triage.</div>';
+      $('#flag').innerHTML = data.demo ? '<span class="demoflag">demo data</span>' : '';
+      const items = data.items || [];
+      const c = (re) => items.filter(re).length;
+      $('#summary').innerHTML = pill(items.length,'chats') + pill(c(i=>/REPLY/.test(i.type)),'to reply')
+        + pill(c(i=>/TASK/.test(i.type)),'tasks') + pill(c(i=>i.type==='NOISE'),'noise');
+      $('#list').innerHTML = items.map(card).join('') || '<div class="state">Inbox zero. Nothing to triage.</div>';
+    }catch(e){ $('#err').innerHTML = '<div class="err">'+esc(String(e.message||e))+'</div>'; }
+    b.disabled = false; b.textContent = 'Refresh';
   }
   const pill = (n,l) => '<div class="pill"><b>'+n+'</b> '+l+'</div>';
 
+  window.__items = {};
   function card(it, idx){
+    window.__items[it.chatId] = it;
     const noise = it.type === 'NOISE';
-    const tagClass = noise ? 'noise' : (/TASK/.test(it.type) && !/REPLY/.test(it.type) ? 'task' : '');
+    const tc = noise ? 'noise' : (/TASK/.test(it.type) && !/REPLY/.test(it.type) ? 'task' : '');
     return '<div class="card '+(idx===0&&!noise?'top':'')+'">'
-      + '<div class="row1">'
-      +   '<span class="score '+(noise?'noise':'')+'">'+(it.score??'')+'</span>'
-      +   '<span class="who">'+esc(it.who)+' <span class="net">· '+esc(it.network)+'</span></span>'
-      +   '<span class="tag '+tagClass+'">'+esc(it.type)+'</span>'
-      + '</div>'
+      + '<div class="row1"><span class="score '+(noise?'noise':'')+'">'+(it.score??'')+'</span>'
+      + '<span class="who">'+esc(it.who)+' <span class="net">· '+esc(it.network)+'</span></span>'
+      + '<span class="tag '+tc+'">'+esc(it.type)+'</span></div>'
       + '<div class="ix">importance '+(it.importance??'?')+' × urgency '+(it.urgency??'?')+'</div>'
       + '<div class="body">'+esc(it.summary)+'</div>'
       + (it.nextStep ? '<div class="next"><b>Next:</b> '+esc(it.nextStep)+'</div>' : '')
-      + (it.draft ? '<div class="draft" id="d'+idx+'">'+esc(it.draft)+'</div>' : '')
+      + (it.draft ? '<div class="draft">'+esc(it.draft)+'</div>' : '')
       + '<div class="acts">'
-      +   (it.draft ? '<button class="act" onclick="copyDraft('+idx+',this)">Copy draft</button>' : '')
+      +   (noise ? '' : '<button class="act primary" onclick="draftFor(\''+it.chatId+'\')">Draft reply</button>')
       +   '<button class="act" onclick="doAct(\''+it.chatId+'\',\'archive\',this)">Archive</button>'
       +   '<button class="act" onclick="this.classList.toggle(\'done\')">Done</button>'
-      + '</div>'
-      + '</div>';
-  }
-
-  function copyDraft(i, btn){
-    const t = $('#d'+i).innerText; if(navigator.clipboard) navigator.clipboard.writeText(t);
-    btn.classList.add('done'); btn.textContent='Copied'; setTimeout(()=>{btn.classList.remove('done');btn.textContent='Copy draft';},1500);
+      + '</div></div>';
   }
   async function doAct(chatId, action, btn){
     btn.disabled = true;
-    try{ await fetch('/api/act',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action,chatId})});
-      btn.classList.add('done'); btn.textContent = action==='archive'?'Archived':'Done';
-    }catch(e){ btn.textContent='Failed'; }
+    try{ const r = await (await fetch('/api/act',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action,chatId})})).json();
+      btn.classList.add('done'); btn.textContent = r.error ? 'Failed' : 'Archived';
+    }catch{ btn.textContent='Failed'; }
+  }
+
+  // ---------- draft assistant ----------
+  function setCtx(c){
+    ctx = c; $('#menu').innerHTML=''; $('#to').value='';
+    renderCtx();
+    $('.assistant').scrollIntoView({behavior:'smooth',block:'center'});
+    $('#chatin').focus();
+  }
+  function clearCtx(){ ctx=null; renderCtx(); }
+  function renderCtx(){
+    const el = $('#ctx');
+    if(ctx){
+      el.innerHTML = '<span class="ctxchip">Drafting for '+esc(ctx.who)+' <span class="x" title="clear" onclick="clearCtx()">✕</span></span>';
+    }else{
+      el.innerHTML = '<div class="results"><input class="toinput" id="to" placeholder="reply to (type a name)" autocomplete="off" onkeydown="if(event.key===\'Enter\')doSearch()" oninput="scheduleSearch()" /><div id="menu"></div></div>';
+    }
+  }
+  function draftFor(chatId){
+    const it = window.__items[chatId]; if(!it) return;
+    setCtx({ id: chatId, who: it.who, network: it.network });
+    sendChat('Draft a reply.');
+  }
+
+  let st;
+  function scheduleSearch(){ clearTimeout(st); st = setTimeout(doSearch, 350); }
+  async function doSearch(){
+    const q = ($('#to')||{}).value ? $('#to').value.trim() : '';
+    if(q.length < 2){ $('#menu').innerHTML=''; return; }
+    try{
+      const data = await (await fetch('/api/search?q='+encodeURIComponent(q))).json();
+      const items = data.items || [];
+      $('#menu').innerHTML = items.length
+        ? '<div class="menu">'+items.map(c=>'<div onclick="setCtx({id:\''+c.id+'\',who:\''+esc(c.who).replace(/\x27/g,"")+'\',network:\''+esc(c.network)+'\'})">'+esc(c.who)+' <span class="n">'+esc(c.network)+'</span></div>').join('')+'</div>'
+        : '';
+    }catch{ $('#menu').innerHTML=''; }
+  }
+
+  async function sendChat(preset){
+    const inp = $('#chatin');
+    const text = (preset !== undefined ? preset : inp.value).trim();
+    if(!text) return;
+    if(preset === undefined) inp.value='';
+    msgs.push({role:'user', content:text});
+    renderMsgs(true);
+    const b = $('#chatsend'); b.disabled = true;
+    try{
+      const data = await (await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({messages:msgs, chat:ctx})})).json();
+      if(data.error) throw new Error(data.error);
+      msgs.push({role:'assistant', content:data.reply});
+    }catch(e){ msgs.push({role:'assistant', content:'(error: '+String(e.message||e)+')'}); }
+    renderMsgs(); b.disabled = false;
+  }
+
+  function renderMsgs(thinking){
+    const box = $('#msgs');
+    let html = msgs.map((m,i)=>{
+      if(m.role==='user') return '<div class="msg me">'+esc(m.content)+'</div>';
+      return '<div class="msg bot">'+esc(m.content)
+        + '<div class="macts"><button class="act" onclick="copyMsg('+i+',this)">Copy</button>'
+        + (ctx ? '<button class="act primary" onclick="sendTo('+i+',this)">Send to '+esc(ctx.who)+'</button>' : '')
+        + '</div></div>';
+    }).join('');
+    if(thinking) html += '<div class="msg bot hint">drafting…</div>';
+    box.innerHTML = html || '<div class="hint">Pick a name above, then ask for a draft.</div>';
+    box.scrollTop = box.scrollHeight;
+  }
+  function copyMsg(i, btn){ const t = msgs[i].content; if(navigator.clipboard) navigator.clipboard.writeText(t);
+    btn.classList.add('done'); btn.textContent='Copied'; setTimeout(()=>{btn.classList.remove('done');btn.textContent='Copy';},1500); }
+  async function sendTo(i, btn){
+    if(!ctx) return; btn.disabled = true; btn.textContent='Sending…';
+    try{ const r = await (await fetch('/api/send',{method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({chatId:ctx.id, text:msgs[i].content})})).json();
+      btn.classList.add('done'); btn.textContent = r.error ? 'Failed' : (r.demo ? 'Sent (demo)' : 'Sent');
+    }catch{ btn.textContent='Failed'; btn.disabled=false; }
   }
 </script>
 </body>

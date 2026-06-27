@@ -2,15 +2,11 @@
 //
 // Run:  node server.mjs   then open  http://localhost:4317
 //
-// A thin local proxy: the browser never sees your keys. The server reads your
-// Beeper inbox from the local Desktop API and ranks it importance x urgency.
-//
-// Ranking uses your Claude SUBSCRIPTION by default (LLM=cli), via the Claude
-// Code CLI in headless mode — no Anthropic API credits required. Set LLM=api to
-// use a pay-as-you-go ANTHROPIC_API_KEY instead.
-//
-// Defaults to DEMO mode (sample data). To go live: copy .env.example -> .env,
-// set BEEPER_ACCESS_TOKEN, set DEMO=0.
+// A thin local proxy: the browser never sees your keys. It reads your Beeper
+// inbox from the local Desktop API, ranks it importance x urgency, and runs a
+// draft assistant. Ranking + drafting use your Claude SUBSCRIPTION by default
+// (LLM=cli, via the Claude Code CLI) so no Anthropic API credits are needed.
+// Set LLM=api to use a pay-as-you-go ANTHROPIC_API_KEY instead.
 
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -36,17 +32,18 @@ const PORT = Number(process.env.PORT || 4317);
 const DEMO = process.env.DEMO !== '0';
 const BEEPER_BASE = process.env.BEEPER_API_BASE || 'http://127.0.0.1:23373';
 const BEEPER_TOKEN = process.env.BEEPER_ACCESS_TOKEN || '';
-const LLM = (process.env.LLM || 'cli').toLowerCase(); // 'cli' = your subscription, 'api' = pay-as-you-go key
+const LLM = (process.env.LLM || 'cli').toLowerCase();
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || '';
 const API_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6';
 const CLI_MODEL = process.env.CLAUDE_MODEL || 'sonnet';
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 
+const VOICE = `Write in my voice: casual, mostly lowercase, short. NEVER use em dashes (the "—" character) anywhere; use commas, periods, or separate lines instead. No emojis. Not needy or AI-sounding: say the thing, ask plainly, give the other person an easy out.`;
+
 const RUBRIC = `Score every chat with importance x urgency.
 importance 1-5: 5 = inner circle / money / health / legal / a promise you made; 1 = newsletters, bots, promos, noise.
 urgency 1-5: 5 = someone waiting now / deadline today / you are blocking others; 1 = pure FYI.
-score = importance * urgency (1-25). classify each as REPLY (say something), TASK (do something first), or NOISE (archive candidate).
-Drafts must sound human, not AI: no em dashes, no emojis, never needy. Be direct: say the thing, ask plainly, give an easy out.`;
+score = importance * urgency (1-25). classify each as REPLY (say something), TASK (do something first), or NOISE (archive candidate).`;
 
 const SAMPLE = [
   { chatId: 'demo-otavio', who: 'Otavio', network: 'WhatsApp', importance: 5, urgency: 5, score: 25, type: 'REPLY+TASK',
@@ -57,16 +54,14 @@ const SAMPLE = [
     summary: 'Answered your startup-society question. Renewal decision is due around end of month.',
     nextStep: 'Decide on renewal, reply with timing.',
     draft: 'appreciate this chance, super helpful. still chewing on the decision but i will get back to you before end of month.' },
-  { chatId: 'demo-jangle', who: 'Jangle', network: 'WhatsApp', importance: 4, urgency: 1, score: 4, type: 'REPLY',
-    summary: 'Shared a song. Nothing owed.', nextStep: 'Optional ack.', draft: 'saved, giving it a listen' },
+  { chatId: 'demo-joey', who: 'Joey', network: 'WhatsApp', importance: 4, urgency: 3, score: 12, type: 'REPLY',
+    summary: 'Asked if you can cover the apartment slot. Waiting on a yes or no.',
+    nextStep: 'Tell him whether you are in.', draft: 'hey joey, checking on it now, will confirm tonight' },
   { chatId: 'demo-spoil', who: 'Spoil Me Club', network: 'X', importance: 1, urgency: 1, score: 1, type: 'NOISE',
     summary: 'Spam group invite.', nextStep: 'Archive.', draft: '' },
-  { chatId: 'demo-airdrop', who: 'Airdrop Bot', network: 'X', importance: 1, urgency: 1, score: 1, type: 'NOISE',
-    summary: 'Crypto airdrop spam.', nextStep: 'Archive.', draft: '' },
 ];
 
-// --- Beeper local API (live mode) ---
-// Confirm exact paths/params at https://developers.beeper.com/desktop-api-reference
+// --- Beeper local API ---
 async function beeper(path, opts = {}) {
   const r = await fetch(`${BEEPER_BASE}${path}`, {
     ...opts,
@@ -77,7 +72,6 @@ async function beeper(path, opts = {}) {
 }
 
 async function fetchInbox() {
-  // Primary inbox (non-archived, non-low-priority); includes read-but-unreplied.
   const chats = await beeper(`/v1/chats/search?inbox=primary&limit=40`);
   const list = chats.items || [];
   const enriched = [];
@@ -89,9 +83,55 @@ async function fetchInbox() {
   return enriched;
 }
 
+async function transcriptFor(chatId, limit = 12) {
+  const m = await beeper(`/v1/chats/${chatId}/messages?limit=${limit}`);
+  const items = (m.items || m || []).slice().reverse();
+  return items.map((x) => `${x.isSender ? 'Me' : (x.senderName || 'Them')}: ${x.text || '[media]'}`).join('\n');
+}
+
+async function searchChats(q) {
+  const r = await beeper(`/v1/chats/search?query=${encodeURIComponent(q)}&type=single&limit=6`);
+  return (r.items || []).map((c) => ({ id: c.id || c.chatID, who: c.title || c.name, network: c.network || c.accountID }));
+}
+
+// --- Claude (subscription by default) ---
+function runClaudeCli(prompt) {
+  return new Promise((resolve, reject) => {
+    const env = { ...process.env };
+    delete env.ANTHROPIC_API_KEY; // force subscription auth, not the API
+    const child = spawn(CLAUDE_BIN, ['-p', '--output-format', 'json', '--model', CLI_MODEL], { env, cwd: tmpdir(), shell: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = '', err = '';
+    child.stdout.on('data', (d) => (out += d));
+    child.stderr.on('data', (d) => (err += d));
+    child.on('error', (e) => reject(new Error(`Could not run "${CLAUDE_BIN}". Is Claude Code installed and logged in? ${e.message}`)));
+    child.on('close', (code) => {
+      if (code !== 0) return reject(new Error(`claude exited ${code}: ${err.slice(0, 400)}`));
+      try { resolve(JSON.parse(out).result ?? ''); } catch { reject(new Error(`Unexpected claude output: ${out.slice(0, 300)}`)); }
+    });
+    child.stdin.write(prompt);
+    child.stdin.end();
+  });
+}
+
+async function completeText(prompt, maxTokens = 2000) {
+  if (LLM === 'api') {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: API_MODEL, max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] }),
+    });
+    if (!r.ok) throw new Error(`Anthropic -> ${r.status} ${await r.text().catch(() => '')}`);
+    const data = await r.json();
+    return (data.content || []).map((b) => b.text || '').join('');
+  }
+  return runClaudeCli(prompt);
+}
+
 // --- ranking ---
 function rankPrompt(chats) {
   return `${RUBRIC}
+
+${VOICE}
 
 Rank my Beeper chats (JSON below) by score, descending. For each return:
 chatId, who, network, importance, urgency, score, type (REPLY | TASK | REPLY+TASK | NOISE),
@@ -101,61 +141,59 @@ Respond with ONLY a JSON array, no prose.
 CHATS:
 ${JSON.stringify(chats).slice(0, 90000)}`;
 }
-
-function parseItems(text) {
-  return JSON.parse(text.slice(text.indexOf('['), text.lastIndexOf(']') + 1));
-}
-
-// Rank via the user's Claude subscription (Claude Code CLI, no API credits).
-function rankWithCli(chats) {
-  return new Promise((resolve, reject) => {
-    const env = { ...process.env };
-    delete env.ANTHROPIC_API_KEY; // force subscription auth instead of the API
-    const args = ['-p', '--output-format', 'json', '--model', CLI_MODEL];
-    const child = spawn(CLAUDE_BIN, args, { env, cwd: tmpdir(), shell: true, stdio: ['pipe', 'pipe', 'pipe'] });
-    let out = '', err = '';
-    child.stdout.on('data', (d) => (out += d));
-    child.stderr.on('data', (d) => (err += d));
-    child.on('error', (e) => reject(new Error(`Could not run "${CLAUDE_BIN}". Is Claude Code installed and logged in? ${e.message}`)));
-    child.on('close', (code) => {
-      if (code !== 0) return reject(new Error(`claude exited ${code}: ${err.slice(0, 400)}`));
-      let result;
-      try { result = JSON.parse(out).result; } catch { return reject(new Error(`Unexpected claude output: ${out.slice(0, 300)}`)); }
-      try { resolve(parseItems(result)); } catch (e) { reject(new Error(`Could not parse ranking JSON: ${e.message}`)); }
-    });
-    child.stdin.write(rankPrompt(chats));
-    child.stdin.end();
-  });
-}
-
-// Rank via the pay-as-you-go Anthropic API (needs ANTHROPIC_API_KEY with credits).
-async function rankWithApi(chats) {
-  const r = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: API_MODEL, max_tokens: 4000, messages: [{ role: 'user', content: rankPrompt(chats) }] }),
-  });
-  if (!r.ok) throw new Error(`Anthropic -> ${r.status} ${await r.text().catch(() => '')}`);
-  const data = await r.json();
-  return parseItems((data.content || []).map((b) => b.text || '').join(''));
-}
+function parseItems(text) { return JSON.parse(text.slice(text.indexOf('['), text.lastIndexOf(']') + 1)); }
 
 async function getRankedInbox() {
   if (DEMO) return { demo: true, items: SAMPLE };
   if (!BEEPER_TOKEN) throw new Error('Set BEEPER_ACCESS_TOKEN (or keep DEMO=1).');
   if (LLM === 'api' && !ANTHROPIC_KEY) throw new Error('LLM=api needs ANTHROPIC_API_KEY (or use LLM=cli for your subscription).');
-  const chats = await fetchInbox();
-  const items = LLM === 'api' ? await rankWithApi(chats) : await rankWithCli(chats);
+  const items = parseItems(await completeText(rankPrompt(await fetchInbox()), 4000));
   items.sort((a, b) => (b.score || 0) - (a.score || 0));
   return { demo: false, llm: LLM, items };
 }
 
+// --- draft assistant ---
+function chatPrompt(messages, ctx) {
+  const convo = messages.map((m) => `${m.role === 'user' ? 'Me' : 'You'}: ${m.content}`).join('\n');
+  const context = ctx
+    ? `\nYou are helping me reply to my chat with ${ctx.who}${ctx.network ? ` (${ctx.network})` : ''}.\nRecent messages, newest last:\n${ctx.transcript || '(none loaded)'}\n`
+    : '';
+  return `You are beeper.chat's draft assistant. You help me reply to people on my messaging apps.
+${VOICE}
+When I ask for a reply or a draft, output ONLY the message text I should send, ready to paste, in my voice. No quotes around it, no labels, no preamble. If I am just chatting or asking a question, answer briefly. Keep replies short.
+${context}
+Conversation:
+${convo}
+You:`;
+}
+
+async function handleChat(body) {
+  const messages = Array.isArray(body.messages) ? body.messages.slice(-20) : [];
+  let ctx = null;
+  if (body.chat && body.chat.who) {
+    ctx = { who: body.chat.who, network: body.chat.network || '', transcript: '' };
+    if (body.chat.id && !DEMO && BEEPER_TOKEN) {
+      try { ctx.transcript = await transcriptFor(body.chat.id); } catch {}
+    }
+  }
+  const reply = (await completeText(chatPrompt(messages, ctx), 1500)).trim();
+  return { reply };
+}
+
+// --- write actions (Rule 0: only on an explicit user click) ---
 async function act(action, chatId) {
   if (DEMO) return { ok: true, demo: true };
-  if (action === 'archive') { await beeper(`/v1/chats/${chatId}`, { method: 'PATCH', body: JSON.stringify({ isArchived: true }) }); return { ok: true }; }
-  if (action === 'pin') { await beeper(`/v1/chats/${chatId}`, { method: 'PATCH', body: JSON.stringify({ isPinned: true }) }); return { ok: true }; }
-  if (action === 'lowpriority') { await beeper(`/v1/chats/${chatId}`, { method: 'PATCH', body: JSON.stringify({ isLowPriority: true }) }); return { ok: true }; }
-  return { ok: false, error: `unknown action ${action}` };
+  const map = { archive: { isArchived: true }, pin: { isPinned: true }, lowpriority: { isLowPriority: true } };
+  if (!map[action]) return { ok: false, error: `unknown action ${action}` };
+  await beeper(`/v1/chats/${chatId}`, { method: 'PATCH', body: JSON.stringify(map[action]) });
+  return { ok: true };
+}
+
+async function sendMessage(chatId, text) {
+  if (DEMO) return { ok: true, demo: true };
+  if (!chatId || !text) return { ok: false, error: 'missing chatId or text' };
+  await beeper(`/v1/chats/${chatId}/messages`, { method: 'POST', body: JSON.stringify({ text }) });
+  return { ok: true };
 }
 
 // --- HTTP ---
@@ -163,20 +201,22 @@ function send(res, code, body, type = 'application/json') {
   res.writeHead(code, { 'Content-Type': type });
   res.end(typeof body === 'string' ? body : JSON.stringify(body));
 }
+async function readBody(req) { let b = ''; for await (const c of req) b += c; return JSON.parse(b || '{}'); }
 
 const server = createServer(async (req, res) => {
   try {
-    if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html')) {
+    const url = new URL(req.url, 'http://localhost');
+    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
       return send(res, 200, await readFile(join(DIR, 'public', 'index.html'), 'utf8'), 'text/html');
     }
-    if (req.method === 'GET' && req.url === '/api/inbox') {
-      return send(res, 200, await getRankedInbox());
+    if (req.method === 'GET' && url.pathname === '/api/inbox') return send(res, 200, await getRankedInbox());
+    if (req.method === 'GET' && url.pathname === '/api/search') {
+      if (DEMO || !BEEPER_TOKEN) return send(res, 200, { items: [] });
+      return send(res, 200, { items: await searchChats(url.searchParams.get('q') || '') });
     }
-    if (req.method === 'POST' && req.url === '/api/act') {
-      let body = ''; for await (const c of req) body += c;
-      const { action, chatId } = JSON.parse(body || '{}');
-      return send(res, 200, await act(action, chatId));
-    }
+    if (req.method === 'POST' && url.pathname === '/api/chat') return send(res, 200, await handleChat(await readBody(req)));
+    if (req.method === 'POST' && url.pathname === '/api/act') { const b = await readBody(req); return send(res, 200, await act(b.action, b.chatId)); }
+    if (req.method === 'POST' && url.pathname === '/api/send') { const b = await readBody(req); return send(res, 200, await sendMessage(b.chatId, b.text)); }
     send(res, 404, { error: 'not found' });
   } catch (e) {
     send(res, 500, { error: String(e.message || e) });
@@ -186,5 +226,4 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, () => {
   const mode = DEMO ? 'DEMO data' : `LIVE: Beeper + Claude (${LLM === 'api' ? 'API key' : 'subscription'})`;
   console.log(`beeper.chat web  ->  http://localhost:${PORT}   [${mode}]`);
-  if (DEMO) console.log('Demo mode. Copy .env.example -> .env, add BEEPER_ACCESS_TOKEN, set DEMO=0 to go live.');
 });
