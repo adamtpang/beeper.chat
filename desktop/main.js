@@ -8,6 +8,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
 const http = require('node:http');
+const { spawn } = require('node:child_process');
 
 const PORT = process.env.PORT || 4317;
 process.env.PORT = String(PORT);
@@ -57,7 +58,37 @@ function createWindow() {
   win.loadURL(`http://localhost:${PORT}/`);
 }
 
+// Beeper Desktop serves the local API this app reads. If it is not running,
+// start it in the background so beeper.chat works without you opening Beeper.
+function apiUp() {
+  return new Promise((resolve) => {
+    const req = http.get('http://127.0.0.1:23373/v0/mcp', (r) => { r.destroy(); resolve(true); });
+    req.on('error', () => resolve(false));
+    req.setTimeout(2500, () => { req.destroy(); resolve(false); });
+  });
+}
+function findBeeperExe() {
+  const local = process.env.LOCALAPPDATA || '';
+  const cands = [
+    process.env.BEEPER_EXE,
+    path.join(local, 'Programs', 'BeeperTexts', 'Beeper.exe'),
+    path.join(local, 'Programs', 'Beeper', 'Beeper.exe'),
+  ].filter(Boolean);
+  return cands.find((p) => { try { return fs.existsSync(p); } catch { return false; } });
+}
+async function ensureBeeper() {
+  if (await apiUp()) return;
+  const exe = findBeeperExe();
+  if (!exe) return; // can't find it; the app will show the connect-Beeper message
+  try { spawn(exe, [], { detached: true, stdio: 'ignore' }).unref(); } catch {}
+  for (let i = 0; i < 80; i++) { // wait up to ~40s for Beeper's API to come up
+    await new Promise((r) => setTimeout(r, 500));
+    if (await apiUp()) return;
+  }
+}
+
 app.whenReady().then(async () => {
+  await ensureBeeper();
   try { await startServer(); } catch (e) { console.error('server start error:', e); }
   waitForServer(createWindow);
   app.on('activate', () => {

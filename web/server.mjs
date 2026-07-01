@@ -73,10 +73,10 @@ async function beeper(path, opts = {}) {
 }
 
 async function fetchInbox() {
-  const chats = await beeper(`/v1/chats/search?inbox=primary&limit=40`);
+  const chats = await beeper(`/v1/chats/search?inbox=primary&limit=60`);
   const list = chats.items || [];
   const enriched = [];
-  for (const c of list.slice(0, 40)) {
+  for (const c of list.slice(0, 60)) {
     let messages = [];
     try { const m = await beeper(`/v1/chats/${c.id || c.chatID}/messages?limit=8`); messages = m.items || m || []; } catch {}
     enriched.push({ id: c.id || c.chatID, title: c.title || c.name, network: c.network || c.accountID, unread: c.unreadCount, messages });
@@ -134,9 +134,11 @@ function rankPrompt(chats) {
 
 ${VOICE}
 
-Rank my Beeper chats (JSON below) by score, descending. For each return:
+Rank my Beeper chats (JSON below) by score, descending. Return EXACTLY one object per input chat. Do not skip, merge, or drop any chat. For each return:
 chatId, who, network, importance, urgency, score, type (REPLY | TASK | REPLY+TASK | NOISE),
-summary (one line), nextStep (the concrete next action), draft (a reply in my voice, only if type includes REPLY; else "").
+whoseTurn ("me" if I still owe a reply, "them" if the ball is already in their court, "none" for noise),
+summary (one line), nextStep (the concrete next action), draft (a reply in my voice, only if I owe a reply; else "").
+For a chat where I already replied last or nothing is owed, still include it with a low score, type NOISE or a low-urgency REPLY, and an empty draft.
 Respond with ONLY a JSON array, no prose.
 
 CHATS:
