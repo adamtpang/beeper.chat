@@ -50,6 +50,7 @@ function createWindow() {
     width: 880,
     height: 920,
     title: 'beeper.chat',
+    icon: path.join(__dirname, 'build', 'icon.png'),
     autoHideMenuBar: true,
     backgroundColor: '#F8F8F8',
   });
