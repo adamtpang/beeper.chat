@@ -31,6 +31,25 @@
   .snapnote{font-size:12.5px;color:var(--muted);margin:-2px 0 14px}
   .snapnote a{color:var(--brand);font-weight:600}
 
+  /* triage progress */
+  .prog{display:none;margin:0 0 14px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 13px}
+  .prog.on{display:block}
+  .prog .lbl{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:7px}
+  .prog .track{height:8px;background:var(--bg);border-radius:99px;overflow:hidden}
+  .prog .fill{height:100%;width:0%;background:var(--grad);border-radius:99px;transition:width .5s ease}
+
+  /* ui size + spacing controls */
+  .uictl{display:flex;align-items:center;gap:6px}
+  .uictl button{height:27px;min-width:27px;border-radius:8px;border:1px solid var(--line);background:#fff;cursor:pointer;font-weight:800;color:var(--muted);line-height:1;font-family:var(--font)}
+  .uictl button:hover{border-color:var(--brand);color:var(--brand)}
+  .uictl button.onmode{background:rgba(106,75,229,.1);border-color:var(--brand);color:var(--brand)}
+  .uictl .pct{font-size:11.5px;color:var(--faint);min-width:36px;text-align:center}
+  body.compact .card{padding:10px 12px;margin-bottom:7px}
+  body.compact .body{margin-top:5px}
+  body.compact .acts{margin-top:7px}
+  body.compact .msgs{max-height:220px}
+  body.compact .summary{margin-bottom:9px}
+
   .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:11px}
   .card.top{border-color:rgba(106,75,229,.35);box-shadow:0 12px 26px -22px rgba(106,75,229,.6)}
   .row1{display:flex;align-items:center;gap:10px}
@@ -79,9 +98,16 @@
 <div class="wrap">
   <header>
     <div class="brand"><span class="dot"></span>beeper.chat <span id="flag"></span></div>
-    <button class="btn" id="run" onclick="runTriage()">Run triage</button>
+    <div style="display:flex;align-items:center;gap:10px">
+      <div class="uictl" title="Adjust UI size and spacing">
+        <button onclick="bumpZoom(-0.05)" title="smaller">-</button><span class="pct" id="zoompct">100%</span><button onclick="bumpZoom(0.05)" title="bigger">+</button>
+        <button id="compactbtn" style="padding:0 10px;font-size:11px" onclick="toggleCompact()" title="tighter spacing">compact</button>
+      </div>
+      <button class="btn" id="run" onclick="runTriage()">Run triage</button>
+    </div>
   </header>
   <div class="sub">Your inbox, ranked by importance × urgency. Drafts never send on their own.</div>
+  <div class="prog" id="prog"><div class="lbl"><span id="progstage">starting</span><span id="progpct">0%</span></div><div class="track"><div class="fill" id="progfill"></div></div></div>
   <div class="summary" id="summary"></div>
   <div id="snap"></div>
   <div id="err"></div>
@@ -113,11 +139,55 @@
   let ctx = null;          // { id, who, network }
   let msgs = [];           // [{role, content}]
 
+  // ---------- ui size / spacing (persisted) ----------
+  function applyUi(){
+    const z = parseFloat(localStorage.getItem('bc-zoom') || '1');
+    document.body.style.zoom = z;
+    $('#zoompct').textContent = Math.round(z*100) + '%';
+    const compact = localStorage.getItem('bc-compact') === '1';
+    document.body.classList.toggle('compact', compact);
+    $('#compactbtn').classList.toggle('onmode', compact);
+  }
+  function bumpZoom(d){
+    let z = parseFloat(localStorage.getItem('bc-zoom') || '1') + d;
+    z = Math.min(1.5, Math.max(0.7, Math.round(z*100)/100));
+    localStorage.setItem('bc-zoom', z); applyUi();
+  }
+  function toggleCompact(){
+    localStorage.setItem('bc-compact', localStorage.getItem('bc-compact') === '1' ? '0' : '1'); applyUi();
+  }
+  applyUi();
+
+  // ---------- triage progress bar ----------
+  let progTimer = null, rankStart = 0;
+  function setProg(stage, pct){
+    $('#progstage').textContent = stage; $('#progpct').textContent = Math.round(pct) + '%';
+    $('#progfill').style.width = pct + '%';
+  }
+  function startProg(){
+    $('#prog').classList.add('on'); setProg('starting', 2); rankStart = 0;
+    progTimer = setInterval(async () => {
+      try{
+        const p = await (await fetch('/api/progress')).json();
+        if(p.stage === 'fetching chat list') setProg('fetching chat list', 4);
+        else if(p.stage === 'reading chats' && p.total > 0) setProg('reading chats ' + p.done + ' of ' + p.total, 5 + 60*(p.done/p.total));
+        else if(p.stage === 'ranking with claude'){ if(!rankStart) rankStart = Date.now();
+          const t = (Date.now() - rankStart)/1000; setProg('ranking with claude', Math.min(95, 66 + t*0.5)); }
+        else if(p.stage === 'saving snapshot') setProg('saving snapshot', 97);
+      }catch{}
+    }, 700);
+  }
+  function endProg(){
+    if(progTimer){ clearInterval(progTimer); progTimer = null; }
+    setProg('done', 100); setTimeout(() => $('#prog').classList.remove('on'), 800);
+  }
+
   // ---------- inbox ----------
   async function runTriage(){
     const b = $('#run'); b.disabled = true; b.textContent = 'Triaging…';
     $('#err').innerHTML = '';
     $('#list').innerHTML = '<div class="state">Reading your inbox and ranking it…</div>';
+    startProg();
     try{
       const data = await (await fetch('/api/inbox')).json();
       if(data.error) throw new Error(data.error);
@@ -130,6 +200,7 @@
         ? '<div class="snapnote">Saved a triage snapshot ('+esc(data.snapshot.when)+'). <a href="/api/snapshot" target="_blank">Open the list</a>. Folder: '+esc(data.snapshot.dir)+'</div>' : '';
       $('#list').innerHTML = items.map(card).join('') || '<div class="state">Inbox zero. Nothing to triage.</div>';
     }catch(e){ $('#err').innerHTML = '<div class="err">'+esc(String(e.message||e))+'</div>'; }
+    endProg();
     b.disabled = false; b.textContent = 'Refresh';
   }
   const pill = (n,l) => '<div class="pill"><b>'+n+'</b> '+l+'</div>';

@@ -54,7 +54,10 @@ function createWindow() {
     icon: path.join(__dirname, 'build', 'icon.png'),
     autoHideMenuBar: true,
     backgroundColor: '#F8F8F8',
+    show: false,
   });
+  win.maximize();
+  win.show();
   win.loadURL(`http://localhost:${PORT}/`);
 }
 

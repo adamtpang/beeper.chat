@@ -39,6 +39,9 @@ const CLI_MODEL = process.env.CLAUDE_MODEL || 'sonnet';
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 const SNAPSHOT_DIR = process.env.SNAPSHOT_DIR || join(DIR, 'snapshots');
 
+// live progress for the UI's triage bar
+const progress = { active: false, stage: 'idle', done: 0, total: 0 };
+
 const VOICE = `Write in my voice: casual, mostly lowercase, short. NEVER use em dashes (the "—" character) anywhere; use commas, periods, or separate lines instead. No emojis. Not needy or AI-sounding: say the thing, ask plainly, give the other person an easy out.`;
 
 const RUBRIC = `Score every chat with importance x urgency.
@@ -73,13 +76,16 @@ async function beeper(path, opts = {}) {
 }
 
 async function fetchInbox() {
+  progress.stage = 'fetching chat list';
   const chats = await beeper(`/v1/chats/search?inbox=primary&limit=60`);
-  const list = chats.items || [];
+  const list = (chats.items || []).slice(0, 60);
+  progress.stage = 'reading chats'; progress.total = list.length; progress.done = 0;
   const enriched = [];
-  for (const c of list.slice(0, 60)) {
+  for (const c of list) {
     let messages = [];
     try { const m = await beeper(`/v1/chats/${c.id || c.chatID}/messages?limit=8`); messages = m.items || m || []; } catch {}
     enriched.push({ id: c.id || c.chatID, title: c.title || c.name, network: c.network || c.accountID, unread: c.unreadCount, messages });
+    progress.done++;
   }
   return enriched;
 }
@@ -183,12 +189,20 @@ function trySnapshot(items) {
 }
 
 async function getRankedInbox() {
-  if (DEMO) return { demo: true, items: SAMPLE, snapshot: trySnapshot(SAMPLE) };
-  if (!BEEPER_TOKEN) throw new Error('Set BEEPER_ACCESS_TOKEN (or keep DEMO=1).');
-  if (LLM === 'api' && !ANTHROPIC_KEY) throw new Error('LLM=api needs ANTHROPIC_API_KEY (or use LLM=cli for your subscription).');
-  const items = parseItems(await completeText(rankPrompt(await fetchInbox()), 4000));
-  items.sort((a, b) => (b.score || 0) - (a.score || 0));
-  return { demo: false, llm: LLM, items, snapshot: trySnapshot(items) };
+  progress.active = true; progress.stage = 'starting'; progress.done = 0; progress.total = 0;
+  try {
+    if (DEMO) return { demo: true, items: SAMPLE, snapshot: trySnapshot(SAMPLE) };
+    if (!BEEPER_TOKEN) throw new Error('Set BEEPER_ACCESS_TOKEN (or keep DEMO=1).');
+    if (LLM === 'api' && !ANTHROPIC_KEY) throw new Error('LLM=api needs ANTHROPIC_API_KEY (or use LLM=cli for your subscription).');
+    const chats = await fetchInbox();
+    progress.stage = 'ranking with claude';
+    const items = parseItems(await completeText(rankPrompt(chats), 4000));
+    items.sort((a, b) => (b.score || 0) - (a.score || 0));
+    progress.stage = 'saving snapshot';
+    return { demo: false, llm: LLM, items, snapshot: trySnapshot(items) };
+  } finally {
+    progress.active = false; progress.stage = 'idle';
+  }
 }
 
 // --- draft assistant ---
@@ -249,6 +263,7 @@ const server = createServer(async (req, res) => {
       return send(res, 200, await readFile(join(DIR, 'public', 'index.html'), 'utf8'), 'text/html');
     }
     if (req.method === 'GET' && url.pathname === '/api/inbox') return send(res, 200, await getRankedInbox());
+    if (req.method === 'GET' && url.pathname === '/api/progress') return send(res, 200, progress);
     if (req.method === 'GET' && url.pathname === '/api/snapshot') {
       const f = join(SNAPSHOT_DIR, 'triage-latest.md');
       if (!existsSync(f)) return send(res, 404, { error: 'no snapshot yet' });
