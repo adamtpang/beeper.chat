@@ -42,7 +42,7 @@ const SNAPSHOT_DIR = process.env.SNAPSHOT_DIR || join(DIR, 'snapshots');
 // live progress for the UI's triage bar
 const progress = { active: false, stage: 'idle', done: 0, total: 0 };
 
-const VOICE = `Write in my voice: casual, mostly lowercase, short. NEVER use em dashes (the "—" character) anywhere; use commas, periods, or separate lines instead. No emojis. Not needy or AI-sounding: say the thing, ask plainly, give the other person an easy out.`;
+const VOICE = `Write in my voice and make every reply land. I am a sharp, warm, high-agency founder. My texts are casual, mostly lowercase, short (usually one or two lines). Take a clear position, push the thing forward, and close the loop so the ball lands back in their court. Confident, never arrogant. Warm, never needy. Specific, never generic. When it helps, ask the single sharpest question that unblocks the next step. Cut every filler word: no "just checking in", no "hope you're well", no over-explaining, no hedging, no over-thanking. HARD RULES: never use em dashes (the "—" character) anywhere; use commas, periods, or line breaks instead. No emojis. Never sound like AI or a support bot.`;
 
 const RUBRIC = `Score every chat with importance x urgency.
 importance 1-5: 5 = inner circle / money / health / legal / a promise you made; 1 = newsletters, bots, promos, noise.
