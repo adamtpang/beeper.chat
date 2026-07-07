@@ -6,7 +6,7 @@ covers X/HN/Reddit). Nothing here is auto-posted.
 
 ---
 
-## X / Twitter — build-in-public thread
+## X / Twitter, build-in-public thread
 
 **1/**
 my beeper inbox had 100+ unread across whatsapp, imessage, signal, telegram and
