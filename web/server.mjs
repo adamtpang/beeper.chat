@@ -96,6 +96,81 @@ async function transcriptFor(chatId, limit = 12) {
   return items.map((x) => `${x.isSender ? 'Me' : (x.senderName || 'Them')}: ${x.text || '[media]'}`).join('\n');
 }
 
+// --- full thread history ---
+// NOTE: Beeper's local API IGNORES ?limit and always returns 20 items per page.
+// The only way to get real history is to walk `oldestCursor` with
+// direction=before until hasMore is false. Do not "fix" this by raising limit.
+const PAGE_CAP = 200;             // max pages to walk (~4000 messages)
+const THREAD_TTL_MS = 5 * 60_000; // cache full transcripts briefly
+const threadCache = new Map();    // chatId -> { at, data }
+
+function stripHtml(s) {
+  return String(s || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|li|ul|ol|div)>/gi, '\n')
+    .replace(/<li>/gi, '- ')
+    .replace(/<a\b[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/gis, (m, href, txt) =>
+      href.startsWith('https://matrix.to') ? txt : (txt && txt !== href ? `${txt} (${href})` : href))
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ')
+    .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+const utcStamp = (iso) => {
+  const d = new Date(iso), p = (n) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+};
+
+async function fullTranscript(chatId, { maxMessages = 4000 } = {}) {
+  const hit = threadCache.get(chatId);
+  if (hit && Date.now() - hit.at < THREAD_TTL_MS) return hit.data;
+
+  const byId = new Map();
+  let cursor = null, pages = 0, truncated = false;
+  while (pages < PAGE_CAP) {
+    let path = `/v1/chats/${encodeURIComponent(chatId)}/messages?limit=100`;
+    if (cursor) path += `&cursor=${encodeURIComponent(cursor)}&direction=before`;
+    const j = await beeper(path);
+    for (const m of j.items || []) byId.set(m.id, m);
+    pages++;
+    if (byId.size >= maxMessages) { truncated = true; break; }
+    if (!j.hasMore || !j.oldestCursor || j.oldestCursor === cursor) break;
+    cursor = j.oldestCursor;
+  }
+
+  const all = [...byId.values()].sort((a, b) => Number(a.sortKey) - Number(b.sortKey));
+  const lines = [];
+  let count = 0, first = null, last = null;
+  for (const m of all) {
+    if (m.type === 'REACTION' || m.isHidden) continue; // folded onto their target below
+    const ts = m.timestamp;
+    if (!first || ts < first) first = ts;
+    if (!last || ts > last) last = ts;
+    let body = m.isDeleted ? '[deleted message]' : stripHtml(m.text);
+    const atts = m.attachments || [];
+    if (atts.length) {
+      const tags = atts.map((a) => `[${(a.type || m.type || 'file').toUpperCase()}${a.fileName ? ': ' + a.fileName : ''}]`).join(' ');
+      body = body ? `${tags} ${body}` : tags;
+    } else if (!body && m.type && m.type !== 'TEXT') body = `[${m.type}]`;
+    if (!body) continue;
+    if (m.reactions && m.reactions.length) {
+      body += `  (reactions: ${m.reactions.map((r) => r.reactionKey || 'emoji').join(', ')})`;
+    }
+    lines.push(`[${utcStamp(ts)}] ${m.isSender ? 'Me' : (m.senderName || 'Them')}: ${body.replace(/\n/g, '\n    ')}`);
+    count++;
+  }
+  const data = {
+    transcript: lines.join('\n'),
+    count,
+    truncated,
+    first: first ? utcStamp(first) : null,
+    last: last ? utcStamp(last) : null,
+    range: first && last ? `${utcStamp(first)} to ${utcStamp(last)} UTC` : '',
+  };
+  threadCache.set(chatId, { at: Date.now(), data });
+  return data;
+}
+
 async function searchChats(q) {
   const r = await beeper(`/v1/chats/search?query=${encodeURIComponent(q)}&type=single&limit=6`);
   return (r.items || []).map((c) => ({ id: c.id || c.chatID, who: c.title || c.name, network: c.network || c.accountID }));
@@ -220,16 +295,40 @@ ${convo}
 You:`;
 }
 
+// Thread analyst: same chat box, but grounded in the WHOLE transcript.
+function analyzePrompt(messages, ctx) {
+  const convo = messages.map((m) => `${m.role === 'user' ? 'Me' : 'You'}: ${m.content}`).join('\n');
+  return `You are beeper.chat's thread analyst. You are looking at my conversation with ${ctx.who}${ctx.network ? ` (${ctx.network})` : ''}.
+
+FULL TRANSCRIPT — ${ctx.count} messages${ctx.truncated ? ' (capped to the most recent)' : ' (complete, back to the first message)'}${ctx.range ? `, ${ctx.range}` : ''}. Oldest first:
+---
+${ctx.transcript || '(none loaded)'}
+---
+
+Answer my questions about this conversation. Ground every claim in the transcript and cite the date when you reference something specific. NEVER invent facts, quotes, dates, numbers, or commitments that are not above. If something is not in the transcript, say so plainly.
+${VOICE}
+Apply those voice rules ONLY when I explicitly ask you to draft or write a message. Otherwise just answer, concise and specific.
+
+Conversation:
+${convo}
+You:`;
+}
+
 async function handleChat(body) {
   const messages = Array.isArray(body.messages) ? body.messages.slice(-20) : [];
+  const analyze = body.mode === 'analyze';
   let ctx = null;
   if (body.chat && body.chat.who) {
     ctx = { who: body.chat.who, network: body.chat.network || '', transcript: '' };
     if (body.chat.id && !DEMO && BEEPER_TOKEN) {
-      try { ctx.transcript = await transcriptFor(body.chat.id); } catch {}
+      try {
+        if (analyze) Object.assign(ctx, await fullTranscript(body.chat.id));
+        else ctx.transcript = await transcriptFor(body.chat.id);
+      } catch (e) { ctx.transcript = ''; }
     }
   }
-  const reply = (await completeText(chatPrompt(messages, ctx), 1500)).trim();
+  const prompt = analyze && ctx ? analyzePrompt(messages, ctx) : chatPrompt(messages, ctx);
+  const reply = (await completeText(prompt, analyze ? 4000 : 1500)).trim();
   return { reply };
 }
 
@@ -273,6 +372,12 @@ const server = createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/search') {
       if (DEMO || !BEEPER_TOKEN) return send(res, 200, { items: [] });
       return send(res, 200, { items: await searchChats(url.searchParams.get('q') || '') });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/thread') {
+      const id = url.searchParams.get('id') || '';
+      if (!id) return send(res, 400, { error: 'missing id' });
+      if (DEMO || !BEEPER_TOKEN) return send(res, 200, { transcript: '', count: 0, range: '', demo: true });
+      return send(res, 200, await fullTranscript(id));
     }
     if (req.method === 'POST' && url.pathname === '/api/chat') return send(res, 200, await handleChat(await readBody(req)));
     if (req.method === 'POST' && url.pathname === '/api/act') { const b = await readBody(req); return send(res, 200, await act(b.action, b.chatId)); }

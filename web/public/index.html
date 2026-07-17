@@ -92,6 +92,23 @@
   .inbar{display:flex;gap:9px;padding:12px 13px;border-top:1px solid var(--line)}
   .inbar input{flex:1;font-family:var(--font);font-size:14px;border:1px solid var(--line);border-radius:999px;padding:11px 15px;outline:none}
   .inbar input:focus{border-color:var(--brand)}
+
+  /* thread AI modal */
+  .modal{position:fixed;inset:0;background:rgba(31,30,34,.45);display:none;align-items:center;justify-content:center;z-index:40;padding:20px}
+  .modal.on{display:flex}
+  .sheet{background:var(--card);border-radius:20px;width:100%;max-width:760px;height:min(86vh,760px);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 30px 70px -30px rgba(31,30,34,.7)}
+  .mhead{display:flex;align-items:center;gap:11px;padding:15px 17px;border-bottom:1px solid var(--line);flex:none}
+  .mhead .mwho{font-weight:800;font-size:16px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .mhead .x{margin-left:auto;cursor:pointer;border:0;background:var(--bg);width:30px;height:30px;border-radius:50%;font-size:16px;font-weight:800;color:var(--muted);flex:none}
+  .mhead .x:hover{background:#EDEDF3;color:var(--ink)}
+  .ctxbar{display:flex;align-items:center;gap:8px;padding:9px 17px;border-bottom:1px solid var(--line);font-size:11.5px;color:var(--faint);flex-wrap:wrap;flex:none}
+  .ctxbar .load{font-weight:700;color:var(--brand);background:rgba(106,75,229,.1);border-radius:999px;padding:3px 9px}
+  .ctxbar .warn{font-weight:700;color:#9a6b00;background:#fff3d6;border-radius:999px;padding:3px 9px}
+  .chips{display:flex;gap:7px;padding:11px 17px 0;flex-wrap:wrap;flex:none}
+  .chip{font-size:12px;font-weight:600;border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 12px;cursor:pointer;color:var(--muted);font-family:var(--font)}
+  .chip:hover{border-color:var(--brand);color:var(--brand)}
+  .mmsgs{flex:1;overflow:auto;padding:13px 17px;display:flex;flex-direction:column;gap:11px}
+  .mmsgs .msg{max-width:92%}
 </style>
 </head>
 <body>
@@ -129,6 +146,24 @@
     <div class="inbar">
       <input id="chatin" placeholder="Ask for a draft..." autocomplete="off" onkeydown="if(event.key==='Enter')sendChat()" />
       <button class="btn" id="chatsend" onclick="sendChat()">Send</button>
+    </div>
+  </div>
+</div>
+
+<!-- thread AI: chat with the model about the FULL transcript -->
+<div class="modal" id="modal" onclick="if(event.target===this)closeThread()">
+  <div class="sheet">
+    <div class="mhead">
+      <span class="dot" style="width:11px;height:11px;border-radius:50%;background:var(--grad);flex:none"></span>
+      <span class="mwho" id="mwho">Thread AI</span>
+      <button class="x" onclick="closeThread()" title="close">×</button>
+    </div>
+    <div class="ctxbar" id="ctxbar"><span class="load">loading thread…</span></div>
+    <div class="chips" id="chips"></div>
+    <div class="mmsgs" id="mmsgs"></div>
+    <div class="inbar">
+      <input id="min" placeholder="Ask anything about this conversation..." autocomplete="off" onkeydown="if(event.key==='Enter')sendThread()" />
+      <button class="btn" id="msend" onclick="sendThread()">Ask</button>
     </div>
   </div>
 </div>
@@ -220,6 +255,7 @@
       + (it.draft ? '<div class="draft">'+esc(it.draft)+'</div>' : '')
       + '<div class="acts">'
       +   (noise ? '' : '<button class="act primary" onclick="draftFor(\''+it.chatId+'\')">Draft reply</button>')
+      +   '<button class="act" onclick="openThread(\''+it.chatId+'\')">Ask AI about this thread</button>'
       +   '<button class="act" onclick="doAct(\''+it.chatId+'\',\'archive\',this)">Archive</button>'
       +   '<button class="act" onclick="this.classList.toggle(\'done\')">Done</button>'
       + '</div></div>';
@@ -306,6 +342,72 @@
       btn.classList.add('done'); btn.textContent = r.error ? 'Failed' : (r.demo ? 'Sent (demo)' : 'Sent');
     }catch{ btn.textContent='Failed'; btn.disabled=false; }
   }
+
+  // ---------- thread AI (full transcript) ----------
+  const PROMPTS = [
+    ['Summarize', 'Summarize this entire conversation. Cover how it started, what it has been about, and where it stands now.'],
+    ['What do they need from me?', 'What is this person waiting on from me right now? List every open ask with the date they asked.'],
+    ['What did I promise?', 'List every commitment or promise I made in this thread, with dates, and whether I followed through.'],
+    ['Open loops', 'What loops are still open in this thread? Anything unresolved, unanswered, or left hanging.'],
+    ['Catch me up', 'I have not read this in a while. Catch me up on everything since the last thing I replied to.'],
+    ['Draft a reply', 'Draft the reply I should send right now, in my voice.'],
+  ];
+  let tctx = null, tmsgs = [];
+  function openThread(chatId){
+    const it = window.__items[chatId]; if(!it) return;
+    tctx = { id: chatId, who: it.who, network: it.network }; tmsgs = [];
+    $('#mwho').textContent = it.who + ' · ' + it.network;
+    $('#ctxbar').innerHTML = '<span class="load">loading full thread…</span>';
+    $('#chips').innerHTML = PROMPTS.map((p,i)=>'<button class="chip" onclick="sendThread(PROMPTS['+i+'][1])">'+esc(p[0])+'</button>').join('');
+    renderTMsgs();
+    $('#modal').classList.add('on'); $('#min').focus();
+    loadThreadMeta(chatId);
+  }
+  function closeThread(){ $('#modal').classList.remove('on'); }
+  document.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeThread(); });
+
+  async function loadThreadMeta(chatId){
+    try{
+      const t = await (await fetch('/api/thread?id='+encodeURIComponent(chatId))).json();
+      if(t.error) throw new Error(t.error);
+      if(t.demo){ $('#ctxbar').innerHTML = '<span class="warn">demo mode, no real transcript</span>'; return; }
+      $('#ctxbar').innerHTML = '<span class="load">'+t.count+' messages</span>'
+        + (t.range ? '<span>'+esc(t.range)+'</span>' : '')
+        + (t.truncated ? '<span class="warn">capped to most recent</span>' : '<span>complete thread</span>')
+        + '<span>~'+Math.round((t.transcript||'').length/4000)+'k tokens of context</span>';
+    }catch(e){ $('#ctxbar').innerHTML = '<span class="warn">could not load thread: '+esc(String(e.message||e))+'</span>'; }
+  }
+
+  async function sendThread(preset){
+    const inp = $('#min');
+    const text = (preset !== undefined ? preset : inp.value).trim();
+    if(!text || !tctx) return;
+    if(preset === undefined) inp.value='';
+    tmsgs.push({role:'user', content:text});
+    renderTMsgs(true);
+    const b = $('#msend'); b.disabled = true;
+    try{
+      const data = await (await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({messages:tmsgs, chat:tctx, mode:'analyze'})})).json();
+      if(data.error) throw new Error(data.error);
+      tmsgs.push({role:'assistant', content:data.reply});
+    }catch(e){ tmsgs.push({role:'assistant', content:'(error: '+String(e.message||e)+')'}); }
+    renderTMsgs(); b.disabled = false;
+  }
+
+  function renderTMsgs(thinking){
+    const box = $('#mmsgs');
+    let html = tmsgs.map((m,i)=>{
+      if(m.role==='user') return '<div class="msg me">'+esc(m.content)+'</div>';
+      return '<div class="msg bot">'+esc(m.content)
+        + '<div class="macts"><button class="act" onclick="copyTMsg('+i+',this)">Copy</button></div></div>';
+    }).join('');
+    if(thinking) html += '<div class="msg bot hint">reading the whole thread…</div>';
+    box.innerHTML = html || '<div class="hint">Ask anything about this conversation, or tap a prompt above. The model reads the full history, not just recent messages.</div>';
+    box.scrollTop = box.scrollHeight;
+  }
+  function copyTMsg(i, btn){ const t = tmsgs[i].content; if(navigator.clipboard) navigator.clipboard.writeText(t);
+    btn.classList.add('done'); btn.textContent='Copied'; setTimeout(()=>{btn.classList.remove('done');btn.textContent='Copy';},1500); }
 </script>
 </body>
 </html>
