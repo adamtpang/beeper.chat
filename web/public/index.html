@@ -63,6 +63,13 @@
   .body{color:var(--ink);font-size:14.5px;margin:9px 0 0}
   .next{color:var(--muted);font-size:13px;margin-top:7px}.next b{color:var(--ink)}
   .draft{margin-top:9px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:14px;white-space:pre-wrap}
+  .dedit{width:100%;margin-top:9px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:14px;font-family:var(--font);color:var(--ink);line-height:1.5;resize:vertical;min-height:52px;outline:none}
+  .dedit:focus{border-color:var(--brand);background:#fff}
+  .dedit.sent{opacity:.6;background:var(--bg)}
+  .dacts{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+  .act.send{background:var(--brand);color:#fff;border-color:var(--brand);font-weight:700}
+  .act.send:hover{filter:brightness(1.05);color:#fff}
+  body.compact .dedit{min-height:44px;margin-top:6px}
   .acts{display:flex;gap:8px;margin-top:11px;flex-wrap:wrap}
   .act{font-size:12px;font-weight:600;border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 13px;cursor:pointer;color:var(--ink)}
   .act:hover{border-color:var(--brand);color:var(--brand)} .act.primary{background:var(--brand);color:#fff;border-color:var(--brand)}
@@ -252,13 +259,58 @@
       + '<div class="ix">importance '+(it.importance??'?')+' × urgency '+(it.urgency??'?')+'</div>'
       + '<div class="body">'+esc(it.summary)+'</div>'
       + (it.nextStep ? '<div class="next"><b>Next:</b> '+esc(it.nextStep)+'</div>' : '')
-      + (it.draft ? '<div class="draft">'+esc(it.draft)+'</div>' : '')
+      + (noise ? '' :
+          '<textarea class="dedit" placeholder="No draft yet. Write one here, or tap Regenerate to generate one." oninput="autoGrow(this)">'+esc(it.draft||'')+'</textarea>'
+          + '<div class="dacts">'
+          +   '<button class="act send" onclick="sendFromCard(\''+it.chatId+'\',this)">Send</button>'
+          +   '<button class="act" onclick="tweakDraft(\''+it.chatId+'\',\'shorter\',this)">Shorter</button>'
+          +   '<button class="act" onclick="tweakDraft(\''+it.chatId+'\',\'warmer\',this)">Warmer</button>'
+          +   '<button class="act" onclick="tweakDraft(\''+it.chatId+'\',\'regenerate\',this)">Regenerate</button>'
+          + '</div>')
       + '<div class="acts">'
-      +   (noise ? '' : '<button class="act primary" onclick="draftFor(\''+it.chatId+'\')">Draft reply</button>')
       +   '<button class="act" onclick="openThread(\''+it.chatId+'\')">Ask AI about this thread</button>'
       +   '<button class="act" onclick="doAct(\''+it.chatId+'\',\'archive\',this)">Archive</button>'
-      +   '<button class="act" onclick="this.classList.toggle(\'done\')">Done</button>'
+      +   '<button class="act" onclick="this.closest(\'.card\').classList.toggle(\'done\')">Done</button>'
       + '</div></div>';
+  }
+  function autoGrow(t){ t.style.height='auto'; t.style.height=Math.min(t.scrollHeight, 260)+'px'; }
+  function draftText(chatId, btn){ const c = btn.closest('.card'); return c ? c.querySelector('.dedit') : null; }
+
+  // send the (edited) draft straight to the real chat via the local Beeper API.
+  // Rule 0: always confirm the exact text before it goes out.
+  async function sendFromCard(chatId, btn){
+    const ta = draftText(chatId, btn); if(!ta) return;
+    const text = ta.value.trim();
+    if(!text){ ta.focus(); return; }
+    const it = window.__items[chatId] || {};
+    if(!confirm('Send to '+(it.who||'this chat')+' on '+(it.network||'Beeper')+':\n\n'+text)) return;
+    btn.disabled = true; const old = btn.textContent; btn.textContent = 'Sending…';
+    try{
+      const r = await (await fetch('/api/send',{method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({chatId, text})})).json();
+      if(r.error) throw new Error(r.error);
+      btn.classList.add('done'); btn.textContent = r.demo ? 'Sent (demo)' : 'Sent ✓';
+      ta.setAttribute('readonly','readonly'); ta.classList.add('sent');
+    }catch(e){ btn.disabled=false; btn.textContent=old; alert('Send failed: '+(e.message||e)); }
+  }
+
+  // one-tap rewrite of the current draft, in your voice, editable result.
+  async function tweakDraft(chatId, mode, btn){
+    const ta = draftText(chatId, btn); if(!ta) return;
+    const it = window.__items[chatId] || {};
+    const cur = ta.value.trim();
+    const ask = mode==='regenerate'
+      ? 'Draft a fresh reply.'
+      : (mode==='shorter' ? 'Rewrite this reply shorter and tighter, same intent: '+cur
+                          : 'Rewrite this reply warmer and more personal, same intent: '+cur);
+    btn.disabled = true; const old = btn.textContent; btn.textContent = '…';
+    try{
+      const r = await (await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({messages:[{role:'user',content:ask}], chat:{id:chatId, who:it.who, network:it.network}})})).json();
+      if(r.error) throw new Error(r.error);
+      if(r.reply){ ta.value = r.reply.trim(); autoGrow(ta); }
+    }catch(e){ alert('Tweak failed: '+(e.message||e)); }
+    finally{ btn.disabled=false; btn.textContent=old; }
   }
   async function doAct(chatId, action, btn){
     btn.disabled = true;
