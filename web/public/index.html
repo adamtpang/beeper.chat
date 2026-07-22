@@ -31,6 +31,18 @@
   .snapnote{font-size:12.5px;color:var(--muted);margin:-2px 0 14px}
   .snapnote a{color:var(--brand);font-weight:600}
 
+  /* global ask box */
+  .askbox{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:13px;margin-bottom:14px}
+  .askbar{display:flex;gap:9px}
+  .askbar input{flex:1;font-family:var(--font);font-size:14px;border:1px solid var(--line);border-radius:999px;padding:11px 15px;outline:none;color:var(--ink)}
+  .askbar input:focus{border-color:var(--brand)}
+  .answer{margin-top:12px;font-size:14.5px;line-height:1.6;white-space:pre-wrap;color:var(--ink)}
+  .askmeta{font-size:11.5px;color:var(--faint);margin-top:9px}
+  .srcs{margin-top:9px;display:flex;flex-direction:column;gap:6px}
+  .src{background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:7px 10px;font-size:12px;color:var(--muted)}
+  .src b{color:var(--ink)} .src .w{color:var(--faint)}
+  .thinking{color:var(--faint);font-size:13px;margin-top:11px}
+
   /* triage progress */
   .prog{display:none;margin:0 0 14px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 13px}
   .prog.on{display:block}
@@ -131,6 +143,16 @@
     </div>
   </header>
   <div class="sub">Your inbox, ranked by importance × urgency. Drafts never send on their own.</div>
+
+  <!-- global ask: one question across every chat on every network -->
+  <div class="askbox">
+    <div class="askbar">
+      <input id="askin" placeholder="Ask anything about your messages. e.g. what time does dinner start in batam"
+             autocomplete="off" onkeydown="if(event.key==='Enter')askBeeper()" />
+      <button class="btn" id="askbtn" onclick="askBeeper()">Ask</button>
+    </div>
+    <div id="askout"></div>
+  </div>
   <div class="prog" id="prog"><div class="lbl"><span id="progstage">starting</span><span id="progpct">0%</span></div><div class="track"><div class="fill" id="progfill"></div></div></div>
   <div class="summary" id="summary"></div>
   <div id="snap"></div>
@@ -199,6 +221,27 @@
     localStorage.setItem('bc-compact', localStorage.getItem('bc-compact') === '1' ? '0' : '1'); applyUi();
   }
   applyUi();
+
+  // ---------- global ask (searches every chat, answers with citations) ----------
+  async function askBeeper(){
+    const inp = $('#askin'); const q = inp.value.trim(); if(!q) return;
+    const btn = $('#askbtn'); btn.disabled = true; const old = btn.textContent; btn.textContent = 'Searching…';
+    $('#askout').innerHTML = '<div class="thinking">searching every chat…</div>';
+    try{
+      const d = await (await fetch('/api/ask',{method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({question:q})})).json();
+      if(d.error) throw new Error(d.error);
+      let html = '<div class="answer">'+esc(d.answer||'')+'</div>';
+      if(d.scanned) html += '<div class="askmeta">read '+d.scanned+' matching messages · searched: '+esc((d.searched||[]).slice(1).join(', ')||q)+'</div>';
+      if((d.sources||[]).length){
+        html += '<div class="srcs">' + d.sources.map(s =>
+          '<div class="src"><b>'+esc(s.chat)+'</b> · '+esc(s.who)+' <span class="w">'+esc((s.when||'').slice(0,16).replace('T',' '))+'</span><br>'+esc(s.text)+'</div>'
+        ).join('') + '</div>';
+      }
+      $('#askout').innerHTML = html;
+    }catch(e){ $('#askout').innerHTML = '<div class="err">'+esc(String(e.message||e))+'</div>'; }
+    btn.disabled = false; btn.textContent = old;
+  }
 
   // ---------- triage progress bar ----------
   let progTimer = null, rankStart = 0;

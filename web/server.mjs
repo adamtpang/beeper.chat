@@ -332,6 +332,75 @@ async function handleChat(body) {
   return { reply };
 }
 
+// --- global ask: one question, searched across every chat on every network ---
+// Beeper's local API exposes a message search endpoint. We turn the question
+// into search terms, pull matching messages from ALL chats, and let the model
+// answer strictly from them, with citations.
+const STOPWORDS = new Set(['what','whats','when','where','who','whos','why','how','is','are','was','were','the','a','an','do','does','did','my','me','i','in','on','at','to','for','of','and','or','it','this','that','check','chat','from','with','about','tell','know','get','can','you','they','we','us','again','said','say','says']);
+function keywordsFrom(q) {
+  return [...new Set(
+    q.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
+      .filter((w) => w.length > 2 && !STOPWORDS.has(w))
+  )].slice(0, 5);
+}
+function chatTitleMap(r) {
+  const m = new Map();
+  const cs = r.chats;
+  if (Array.isArray(cs)) for (const c of cs) m.set(c.id || c.chatID, c.title || c.name || '');
+  else if (cs && typeof cs === 'object') for (const [k, v] of Object.entries(cs)) m.set(k, (v && (v.title || v.name)) || '');
+  return m;
+}
+async function searchMessages(term, limit = 20) {
+  const r = await beeper(`/v1/messages/search?query=${encodeURIComponent(term)}&limit=${limit}`);
+  const titles = chatTitleMap(r);
+  return (r.items || []).map((m) => ({
+    id: m.id, chatId: m.chatID,
+    chat: titles.get(m.chatID) || '(unknown chat)',
+    who: m.isSender ? 'Me' : (m.senderName || 'Them'),
+    when: m.timestamp || '',
+    text: stripHtml(m.text || ''),
+  })).filter((m) => m.text);
+}
+
+function askPrompt(question, hits) {
+  const ctx = hits.map((h) => `[${(h.when || '').slice(0, 16)}] (${h.chat}) ${h.who}: ${h.text}`).join('\n');
+  return `You are beeper.chat's assistant. You can see my whole message history across every network.
+
+My question: "${question}"
+
+The most relevant messages found across all my chats:
+---
+${ctx}
+---
+
+Answer directly and concisely using ONLY the messages above. Cite inline like (chat name, sender, date). If messages conflict, trust the most recent and say so. If the answer is not there, say plainly that you could not find it and name what to search instead. Never invent times, names, numbers, or facts. No em dashes, no emojis.`;
+}
+
+async function handleAsk(body) {
+  const question = String(body.question || '').trim();
+  if (!question) return { error: 'Ask a question first.' };
+  if (DEMO || !BEEPER_TOKEN) return { answer: 'Demo mode. Connect Beeper Desktop to search your real messages.', sources: [] };
+
+  const terms = [question, ...keywordsFrom(question)].slice(0, 6);
+  const seen = new Map();
+  for (const t of terms) {
+    try { for (const m of await searchMessages(t, 20)) if (!seen.has(m.id)) seen.set(m.id, m); } catch {}
+  }
+  const hits = [...seen.values()]
+    .sort((a, b) => new Date(b.when) - new Date(a.when))
+    .slice(0, 60);
+  if (!hits.length) {
+    return { answer: 'Nothing in your messages matched that. Try naming the person, group, or a distinctive word from the conversation.', sources: [], searched: terms };
+  }
+  const answer = (await completeText(askPrompt(question, hits), 1200)).trim();
+  return {
+    answer,
+    searched: terms,
+    scanned: hits.length,
+    sources: hits.slice(0, 12).map((h) => ({ chat: h.chat, who: h.who, when: h.when, text: h.text.slice(0, 160) })),
+  };
+}
+
 // --- write actions (Rule 0: only on an explicit user click) ---
 async function act(action, chatId) {
   if (DEMO) return { ok: true, demo: true };
@@ -379,6 +448,7 @@ const server = createServer(async (req, res) => {
       if (DEMO || !BEEPER_TOKEN) return send(res, 200, { transcript: '', count: 0, range: '', demo: true });
       return send(res, 200, await fullTranscript(id));
     }
+    if (req.method === 'POST' && url.pathname === '/api/ask') return send(res, 200, await handleAsk(await readBody(req)));
     if (req.method === 'POST' && url.pathname === '/api/chat') return send(res, 200, await handleChat(await readBody(req)));
     if (req.method === 'POST' && url.pathname === '/api/act') { const b = await readBody(req); return send(res, 200, await act(b.action, b.chatId)); }
     if (req.method === 'POST' && url.pathname === '/api/send') { const b = await readBody(req); return send(res, 200, await sendMessage(b.chatId, b.text)); }
