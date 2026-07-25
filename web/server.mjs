@@ -458,6 +458,48 @@ async function handleChat(body) {
   return { reply };
 }
 
+// --- F2_BLOCK becomes time ---
+// The app cannot hold Google OAuth on its own, so a scheduled block is written
+// to a queue the Claude Code session drains through the Calendar MCP, and the
+// same payload also yields a prefilled Google Calendar URL that works with no
+// auth at all. Nothing is created without an explicit tap.
+const QUEUE_FILE = () => join(SNAPSHOT_DIR, 'calendar-queue.json');
+
+function calendarUrlFor(ev) {
+  const fmt = (d) => new Date(d).toISOString().replace(/[-:]|\.\d{3}/g, '');
+  const p = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: ev.summary,
+    dates: `${fmt(ev.startTime)}/${fmt(ev.endTime)}`,
+    details: ev.description || '',
+  });
+  return `https://calendar.google.com/calendar/render?${p}`;
+}
+
+function scheduleBlock(body) {
+  const { chatId, who = 'someone', deliverable = '', minutes = 30, startTime, network = '' } = body || {};
+  if (!chatId) return { error: 'missing chatId' };
+  const start = startTime ? new Date(startTime) : new Date(Date.now() + 3600_000);
+  const end = new Date(start.getTime() + Math.max(15, Number(minutes) || 30) * 60_000);
+  const ev = {
+    chatId,
+    summary: deliverable ? `${deliverable} (${who})` : `Work owed to ${who}`,
+    description: `Blocked on: ${deliverable || 'work owed'}\nPerson: ${who}${network ? ` (${network})` : ''}\nChat: ${chatId}`,
+    startTime: start.toISOString(),
+    endTime: end.toISOString(),
+    minutes: Math.max(15, Number(minutes) || 30),
+    queuedAt: new Date().toISOString(),
+  };
+  try {
+    mkdirSync(SNAPSHOT_DIR, { recursive: true });
+    const f = QUEUE_FILE();
+    const q = existsSync(f) ? JSON.parse(readFileSync(f, 'utf8')) : [];
+    q.push(ev);
+    writeFileSync(f, JSON.stringify(q, null, 2));
+  } catch (e) { return { error: `could not queue: ${e.message}` }; }
+  return { ok: true, event: ev, calendarUrl: calendarUrlFor(ev), queue: QUEUE_FILE() };
+}
+
 // --- relationship radar: the thing email cannot do ---
 // Comprehensive sweep across every non-archived conversation, not just the
 // primary inbox. Cached, because this reads a lot of history.
@@ -604,6 +646,7 @@ const server = createServer(async (req, res) => {
       if (DEMO || !BEEPER_TOKEN) return send(res, 200, { transcript: '', count: 0, range: '', demo: true });
       return send(res, 200, await fullTranscript(id));
     }
+    if (req.method === 'POST' && url.pathname === '/api/schedule') return send(res, 200, scheduleBlock(await readBody(req)));
     if (req.method === 'GET' && url.pathname === '/api/radar') {
       return send(res, 200, await getRadar({ force: url.searchParams.get('force') === '1' }));
     }
