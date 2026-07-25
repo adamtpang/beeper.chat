@@ -31,6 +31,41 @@
   .snapnote{font-size:12.5px;color:var(--muted);margin:-2px 0 14px}
   .snapnote a{color:var(--brand);font-weight:600}
 
+  /* relationship radar, above the fold */
+  .radar{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:14px}
+  .radar h3{font-size:14px;font-weight:800;margin-bottom:2px;display:flex;align-items:center;gap:8px}
+  .radar .sub2{font-size:12px;color:var(--faint);margin-bottom:11px}
+  .rgroup{margin-top:12px}
+  .rgroup .gt{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+  .rrow{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px;background:var(--bg);cursor:pointer}
+  .rrow:hover{border-color:var(--brand)}
+  .rrow .nm{font-weight:700;font-size:13.5px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rrow .dys{font-size:11px;font-weight:800;color:#9b2c22;background:#fff0ef;border-radius:99px;padding:3px 8px;flex:none}
+  .rrow .wt{font-size:10.5px;color:var(--faint);flex:none}
+  .rrow .lastmsg{font-size:11.5px;color:var(--muted);margin-top:3px}
+  .radar .more{font-size:12px;color:var(--brand);font-weight:600;cursor:pointer;margin-top:4px}
+
+  /* fate sections */
+  .fsec{margin-top:18px}
+  .fhead{display:flex;align-items:baseline;gap:9px;margin-bottom:9px}
+  .fhead .ft{font-weight:800;font-size:15px}
+  .fhead .fn{font-size:12px;color:var(--faint)}
+  .fhead .fd{font-size:12px;color:var(--muted);margin-left:auto}
+  .fate{font-size:10px;font-weight:800;letter-spacing:.05em;padding:3px 8px;border-radius:6px}
+  .fate.f1{background:rgba(13,79,251,.1);color:var(--blue)}
+  .fate.f2{background:rgba(155,44,34,.1);color:#9b2c22}
+  .fate.f3{background:rgba(106,75,229,.12);color:var(--brand)}
+  .fate.f4{background:#EEE;color:var(--faint)}
+  .fate.fu{background:#fff3d6;color:#9a6b00}
+  .why{font-size:12px;color:var(--muted);margin-top:6px;font-style:italic}
+  .cal{font-size:12px;color:var(--muted);margin-top:7px}
+  .cal b{color:var(--ink)}
+  .setfate{font-size:11px;border:1px solid var(--line);background:#fff;border-radius:999px;padding:4px 9px;cursor:pointer;color:var(--muted);font-family:var(--font)}
+  .setfate:hover{border-color:var(--brand);color:var(--brand)}
+  .letgo-list{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px}
+  .letgo-list .lg{font-size:13px;color:var(--muted);padding:5px 0;border-bottom:1px solid var(--line)}
+  .letgo-list .lg:last-child{border-bottom:0}
+
   /* global ask box */
   .askbox{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:13px;margin-bottom:14px}
   .askbar{display:flex;gap:9px}
@@ -154,6 +189,13 @@
     <div id="askout"></div>
   </div>
   <div class="prog" id="prog"><div class="lbl"><span id="progstage">starting</span><span id="progpct">0%</span></div><div class="track"><div class="fill" id="progfill"></div></div></div>
+  <!-- relationship radar: the thing email cannot do. Above everything else. -->
+  <div class="radar" id="radar">
+    <h3><span class="dot" style="width:9px;height:9px;border-radius:50%;background:var(--grad);display:inline-block"></span> Relationship radar</h3>
+    <div class="sub2">Who is quietly slipping. Ranked by who matters, not by what is loudest.</div>
+    <div id="radarbody"><div class="hint">Loading across every conversation…</div></div>
+  </div>
+
   <div class="summary" id="summary"></div>
   <div id="snap"></div>
   <div id="err"></div>
@@ -222,6 +264,100 @@
   }
   applyUi();
 
+  // ---------- relationship radar ----------
+  const RGROUPS = [
+    ['goneQuietOn',       'People I have gone quiet on'],
+    ['unansweredAsks',    'Asks I never answered'],
+    ['moneyThreads',      'Money threads'],
+    ['missedCommitments', 'Dates I committed to and missed'],
+  ];
+  async function loadRadar(force){
+    const box = $('#radarbody');
+    box.innerHTML = '<div class="hint">Scanning every conversation…</div>';
+    try{
+      const d = await (await fetch('/api/radar'+(force?'?force=1':''))).json();
+      if(d.error) throw new Error(d.error);
+      if(d.demo){ box.innerHTML = '<div class="hint">Demo mode. Connect Beeper to see your real radar.</div>'; return; }
+      let html = '';
+      for(const [key,label] of RGROUPS){
+        const rows = (d[key]||[]);
+        if(!rows.length) continue;
+        html += '<div class="rgroup"><div class="gt">'+esc(label)+' ('+rows.length+')</div>';
+        html += rows.slice(0,5).map(r=>
+          '<div class="rrow" onclick="openThread(\''+r.id+'\')" title="open thread AI">'
+          + '<div style="flex:1;min-width:0">'
+          +   '<div class="nm">'+esc(r.title||'')+' <span class="wt">· '+esc(r.network||'')+' · weight '+(r.weight??'?')+'</span></div>'
+          +   (r.ask||r.promise||r.last ? '<div class="lastmsg">'+esc((r.ask||r.promise||r.last||'').slice(0,110))+'</div>' : '')
+          + '</div>'
+          + '<span class="dys">'+(r.days??'?')+'d</span></div>').join('');
+        if(rows.length>5) html += '<div class="more">+'+(rows.length-5)+' more</div>';
+        html += '</div>';
+      }
+      html += '<div class="askmeta">scanned '+(d.scanned||0)+' conversations'+(d.cached?' · cached':'')
+           +' · <span class="more" onclick="loadRadar(true)">rescan</span></div>';
+      box.innerHTML = html || '<div class="hint">Nothing slipping. Every relationship is current.</div>';
+    }catch(e){ box.innerHTML = '<div class="err">'+esc(String(e.message||e))+'</div>'; }
+  }
+  loadRadar();
+
+  // ---------- fates ----------
+  const FATES = [
+    ['F2_BLOCK',   'Blocked on real work', 'f2', 'They are waiting on something only you can make.'],
+    ['F1_QUICK',   'Quick',                'f1', 'Under two minutes each. Edit and send.'],
+    ['F3_WAITING', 'Waiting on them',      'f3', 'Ball is in their court. Send a holding line or let it ride.'],
+    ['UNCLEAR',    'Unclear',              'fu', 'Intent was unreadable, so nothing was assumed.'],
+    ['F4_LET_GO',  'Let go',               'f4', 'No reply owed. This is meant to be the biggest pile.'],
+  ];
+  const fateClass = (f) => (FATES.find(x=>x[0]===f)||[,,'f4'])[2];
+  const fateName  = (f) => (FATES.find(x=>x[0]===f)||[,'Let go'])[1];
+
+  function setFate(chatId, fate){
+    const it = window.__items[chatId]; if(!it) return;
+    it.fate = fate; it.calibrated = false;
+    renderFates(Object.values(window.__items));
+  }
+
+  async function blockTime(chatId, btn){
+    const it = window.__items[chatId]; if(!it) return;
+    btn.disabled = true; const old = btn.textContent; btn.textContent = 'Scheduling…';
+    try{
+      const r = await (await fetch('/api/schedule',{method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({chatId, who:it.who, network:it.network, deliverable:it.deliverable||it.nextStep||'', minutes:it.minutes||30})})).json();
+      if(r.error) throw new Error(r.error);
+      btn.classList.add('done'); btn.textContent = 'Blocked ✓';
+      if(r.calendarUrl) window.open(r.calendarUrl,'_blank');
+    }catch(e){ btn.disabled=false; btn.textContent=old; alert('Could not schedule: '+(e.message||e)); }
+  }
+
+  // F4 clears from YOUR surface only. It never touches read state on their side.
+  function letGoAll(){
+    const ids = Object.values(window.__items).filter(i=>i.fate==='F4_LET_GO').map(i=>i.chatId);
+    ids.forEach(id=>{ delete window.__items[id]; });
+    renderFates(Object.values(window.__items));
+  }
+
+  function renderFates(items){
+    const list = $('#list');
+    if(!items.length){ list.innerHTML = '<div class="state">Surface clear. Nothing is waiting on you.</div>'; return; }
+    let html = '';
+    for(const [fate,label,cls,blurb] of FATES){
+      const rows = items.filter(i=>i.fate===fate);
+      if(!rows.length) continue;
+      html += '<div class="fsec"><div class="fhead"><span class="ft">'+esc(label)+'</span>'
+           +  '<span class="fn">'+rows.length+'</span><span class="fd">'+esc(blurb)+'</span></div>';
+      if(fate==='F4_LET_GO'){
+        html += '<div class="letgo-list">'
+             +  rows.map(i=>'<div class="lg">'+esc(i.who)+' <span class="net">· '+esc(i.network)+'</span>'
+             +    (i.reason?' — '+esc(i.reason):'')+'</div>').join('')
+             +  '<div style="margin-top:10px"><button class="act" onclick="letGoAll()">Clear these from my surface</button></div></div>';
+      } else {
+        html += rows.map((it,idx)=>card(it,idx)).join('');
+      }
+      html += '</div>';
+    }
+    list.innerHTML = html;
+  }
+
   // ---------- global ask (searches every chat, answers with citations) ----------
   async function askBeeper(){
     const inp = $('#askin'); const q = inp.value.trim(); if(!q) return;
@@ -278,12 +414,14 @@
       if(data.error) throw new Error(data.error);
       $('#flag').innerHTML = data.demo ? '<span class="demoflag">demo data</span>' : '';
       const items = data.items || [];
-      const c = (re) => items.filter(re).length;
-      $('#summary').innerHTML = pill(items.length,'chats') + pill(c(i=>/REPLY/.test(i.type)),'to reply')
-        + pill(c(i=>/TASK/.test(i.type)),'tasks') + pill(c(i=>i.type==='NOISE'),'noise');
+      const n = (f) => items.filter(i=>i.fate===f).length;
+      $('#summary').innerHTML = pill(items.length,'chats') + pill(n('F2_BLOCK'),'blocked')
+        + pill(n('F1_QUICK'),'quick') + pill(n('F3_WAITING'),'waiting') + pill(n('F4_LET_GO'),'let go');
       $('#snap').innerHTML = (data.snapshot && !data.snapshot.error)
         ? '<div class="snapnote">Saved a triage snapshot ('+esc(data.snapshot.when)+'). <a href="/api/snapshot" target="_blank">Open the list</a>. Folder: '+esc(data.snapshot.dir)+'</div>' : '';
-      $('#list').innerHTML = items.map(card).join('') || '<div class="state">Inbox zero. Nothing to triage.</div>';
+      window.__items = {};
+      renderFates(items);
+      loadRadar();
     }catch(e){ $('#err').innerHTML = '<div class="err">'+esc(String(e.message||e))+'</div>'; }
     endProg();
     b.disabled = false; b.textContent = 'Refresh';
@@ -293,14 +431,22 @@
   window.__items = {};
   function card(it, idx){
     window.__items[it.chatId] = it;
-    const noise = it.type === 'NOISE';
-    const tc = noise ? 'noise' : (/TASK/.test(it.type) && !/REPLY/.test(it.type) ? 'task' : '');
+    const noise = it.fate === 'F4_LET_GO' || it.fate === 'UNCLEAR';
+    const isBlock = it.fate === 'F2_BLOCK';
     return '<div class="card '+(idx===0&&!noise?'top':'')+'">'
       + '<div class="row1"><span class="score '+(noise?'noise':'')+'">'+(it.score??'')+'</span>'
       + '<span class="who">'+esc(it.who)+' <span class="net">· '+esc(it.network)+'</span></span>'
-      + '<span class="tag '+tc+'">'+esc(it.type)+'</span></div>'
-      + '<div class="ix">importance '+(it.importance??'?')+' × urgency '+(it.urgency??'?')+'</div>'
+      + '<span class="fate '+fateClass(it.fate)+'">'+esc(fateName(it.fate))+'</span></div>'
+      + '<div class="ix">importance '+(it.importance??'?')+' × urgency '+(it.urgency??'?')
+      +   (it.ageBoost ? ' + '+it.ageBoost+' age' : '')
+      +   (it.daysWaiting ? ' · '+it.daysWaiting+'d waiting' : '')
+      +   (it.weight!=null ? ' · weight '+it.weight : '')+'</div>'
+      + (it.reason ? '<div class="why">'+esc(it.reason)+(it.calibrated?' (rule)':'')+'</div>' : '')
       + '<div class="body">'+esc(it.summary)+'</div>'
+      + (isBlock && it.deliverable
+          ? '<div class="cal"><b>Deliverable:</b> '+esc(it.deliverable)+' · ~'+(it.minutes||30)+' min'
+            + ' <button class="act" style="margin-left:8px" onclick="blockTime(\''+it.chatId+'\',this)">Block time</button></div>'
+          : '')
       + (it.nextStep ? '<div class="next"><b>Next:</b> '+esc(it.nextStep)+'</div>' : '')
       + (noise ? '' :
           '<textarea class="dedit" placeholder="No draft yet. Write one here, or tap Regenerate to generate one." oninput="autoGrow(this)">'+esc(it.draft||'')+'</textarea>'
@@ -310,6 +456,10 @@
           +   '<button class="act" onclick="tweakDraft(\''+it.chatId+'\',\'warmer\',this)">Warmer</button>'
           +   '<button class="act" onclick="tweakDraft(\''+it.chatId+'\',\'regenerate\',this)">Regenerate</button>'
           + '</div>')
+      + '<div class="acts">'
+      +   FATES.filter(f=>f[0]!==it.fate).map(f=>
+            '<button class="setfate" onclick="setFate(\''+it.chatId+'\',\''+f[0]+'\')">→ '+esc(f[1])+'</button>').join('')
+      + '</div>'
       + '<div class="acts">'
       +   '<button class="act" onclick="openThread(\''+it.chatId+'\')">Ask AI about this thread</button>'
       +   '<button class="act" onclick="doAct(\''+it.chatId+'\',\'archive\',this)">Archive</button>'
