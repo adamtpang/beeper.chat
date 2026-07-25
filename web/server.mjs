@@ -15,6 +15,7 @@ import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { FATE, assignFate, radar as buildRadar, relationshipWeight, redact } from './fates.mjs';
 
 const DIR = dirname(fileURLToPath(import.meta.url));
 
@@ -75,20 +76,72 @@ async function beeper(path, opts = {}) {
   return r.status === 204 ? null : r.json();
 }
 
-async function fetchInbox() {
+// Who I am, used to detect direct address in group chats. Filled on first use.
+let ME = null;
+async function whoAmI() {
+  if (ME) return ME;
+  try {
+    const accts = await beeper('/v1/accounts');
+    const self = (Array.isArray(accts) ? accts : accts.items || []).find((a) => a.user && a.user.isSelf);
+    ME = self ? { id: self.user.id || '', name: self.user.fullName || self.user.displayText || '' } : { id: '', name: '' };
+  } catch { ME = { id: '', name: '' }; }
+  return ME;
+}
+
+// Normalize a Beeper message into the shape fates.mjs expects.
+const normMsg = (x) => ({
+  isSender: !!x.isSender,
+  senderName: x.senderName || '',
+  text: stripHtml(x.text || ''),
+  timestamp: x.timestamp,
+  mentions: x.mentions || [],
+});
+
+// Conversation-level ingest. type and isMuted are load-bearing: the group-burst
+// and mute calibration rules depend on them.
+async function fetchConversations({ inbox = 'primary', limit = 60, msgs = 15, stage = 'reading chats' } = {}) {
+  await whoAmI();
   progress.stage = 'fetching chat list';
-  const chats = await beeper(`/v1/chats/search?inbox=primary&limit=60`);
-  const list = (chats.items || []).slice(0, 60);
-  progress.stage = 'reading chats'; progress.total = list.length; progress.done = 0;
-  const enriched = [];
+  // the API caps limit at 200 per page, so walk pages until we have enough
+  const PAGE = 100;
+  const found = new Map();
+  let cursor = null;
+  while (found.size < limit) {
+    let q = `?limit=${Math.min(PAGE, limit)}` + (inbox ? `&inbox=${inbox}` : '');
+    if (cursor) q += `&cursor=${encodeURIComponent(cursor)}&direction=before`;
+    const page = await beeper(`/v1/chats/search${q}`);
+    const items = page.items || [];
+    for (const c of items) found.set(c.id || c.chatID, c);
+    if (!page.hasMore || !page.oldestCursor || page.oldestCursor === cursor || !items.length) break;
+    cursor = page.oldestCursor;
+  }
+  const list = [...found.values()].filter((c) => !c.isArchived).slice(0, limit);
+  progress.stage = stage; progress.total = list.length; progress.done = 0;
+  const out = [];
   for (const c of list) {
     let messages = [];
-    try { const m = await beeper(`/v1/chats/${c.id || c.chatID}/messages?limit=8`); messages = m.items || m || []; } catch {}
-    enriched.push({ id: c.id || c.chatID, title: c.title || c.name, network: c.network || c.accountID, unread: c.unreadCount, messages });
+    try {
+      const m = await beeper(`/v1/chats/${c.id || c.chatID}/messages?limit=${msgs}`);
+      messages = (m.items || m || [])
+        .filter((x) => x.type !== 'REACTION' && !x.isHidden)
+        .map(normMsg)
+        .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    } catch {}
+    out.push({
+      id: c.id || c.chatID,
+      title: c.title || c.name,
+      network: c.network || c.accountID,
+      type: c.type === 'group' ? 'group' : 'single',
+      isMuted: !!c.isMuted,
+      unread: c.unreadCount,
+      me: ME,
+      messages,
+    });
     progress.done++;
   }
-  return enriched;
+  return out;
 }
+const fetchInbox = fetchConversations;
 
 async function transcriptFor(chatId, limit = 12) {
   const m = await beeper(`/v1/chats/${chatId}/messages?limit=${limit}`);
@@ -210,41 +263,90 @@ async function completeText(prompt, maxTokens = 2000) {
 }
 
 // --- ranking ---
+// Everything sent to a model is redacted first. Personal messages are the most
+// sensitive data a person owns.
+function forModel(convs) {
+  return convs.map((c) => ({
+    chatId: c.id, who: c.title, network: c.network, type: c.type, muted: c.isMuted,
+    messages: (c.messages || []).slice(-12).map((m) => ({
+      from: m.isSender ? 'me' : (m.senderName || 'them'),
+      at: m.timestamp,
+      text: redact(m.text).slice(0, 500),
+    })),
+  }));
+}
+
 function rankPrompt(chats) {
   return `${RUBRIC}
 
 ${VOICE}
 
-Rank my Beeper chats (JSON below) by score, descending. Return EXACTLY one object per input chat. Do not skip, merge, or drop any chat. For each return:
-chatId, who, network, importance, urgency, score, type (REPLY | TASK | REPLY+TASK | NOISE),
-whoseTurn ("me" if I still owe a reply, "them" if the ball is already in their court, "none" for noise),
-summary (one line), nextStep (the concrete next action), draft (a reply in my voice, only if I owe a reply; else "").
-For a chat where I already replied last or nothing is owed, still include it with a low score, type NOISE or a low-urgency REPLY, and an empty draft.
+You are triaging CHAT, not email. Judge each CONVERSATION on its whole state, never on the last message alone.
+
+Assign every conversation exactly ONE fate:
+- F1_QUICK: I can answer in under 2 minutes. Draft the reply in my register for that person.
+- F2_BLOCK: this person is waiting on real work from me. Give minutes + the one-line deliverable.
+- F3_WAITING: the ball is already in their court, or a date is owed. Draft a one-line holding message.
+- F4_LET_GO: no action needed. Group chatter, reactions, banter, social noise. MOST conversations are this.
+- UNCLEAR: intent genuinely unreadable. Use this instead of guessing. Never invent context.
+
+Calibration, these matter:
+- A group burst is usually zero tasks. Default groups to F4_LET_GO unless I am directly addressed or named.
+- Recency is not importance. An old message from someone who matters outranks 40 messages from this morning.
+- "ok cool" after a resolved thread is F4_LET_GO, not a reply prompt.
+- If I sent the last message, it is F3_WAITING, not F1_QUICK.
+
+Return EXACTLY one object per input chat, no skips or merges:
+chatId, who, network, importance (1-5), urgency (1-5), score (importance*urgency),
+fate (F1_QUICK | F2_BLOCK | F3_WAITING | F4_LET_GO | UNCLEAR),
+reason (ONE line saying why this fate),
+summary (one line), nextStep (concrete next action),
+minutes (integer estimate, only for F2_BLOCK, else 0),
+deliverable (one line, only for F2_BLOCK, else ""),
+draft (reply in my voice for F1_QUICK, holding line for F3_WAITING, else "").
 Respond with ONLY a JSON array, no prose.
 
 CHATS:
-${JSON.stringify(chats).slice(0, 90000)}`;
+${JSON.stringify(forModel(chats)).slice(0, 90000)}`;
 }
 function parseItems(text) { return JSON.parse(text.slice(text.indexOf('['), text.lastIndexOf(']') + 1)); }
 
+const FATE_LABEL = {
+  [FATE.QUICK]: 'Quick (under 2 min)',
+  [FATE.BLOCK]: 'Blocked on real work',
+  [FATE.WAITING]: 'Waiting on them',
+  [FATE.LET_GO]: 'Let go',
+  [FATE.UNCLEAR]: 'Unclear',
+};
+
 function snapshotMarkdown(items, now) {
-  const stamp = now.toLocaleString();
-  const replies = items.filter((i) => i.type !== 'NOISE');
-  const noise = items.filter((i) => i.type === 'NOISE');
-  const cnt = (re) => items.filter((i) => re.test(i.type)).length;
-  let md = `# beeper.chat triage · ${stamp}\n\n`;
-  md += `${items.length} chats · ${cnt(/REPLY/)} to reply · ${cnt(/TASK/)} tasks · ${noise.length} noise\n\n`;
-  md += `## Tackle first (unreplied, ranked)\n\n`;
-  replies.forEach((it, i) => {
-    md += `${i + 1}. [${it.score}] ${it.who} (${it.network}) · ${it.type}\n`;
-    md += `   ${it.summary || ''}\n`;
-    if (it.nextStep) md += `   Next: ${it.nextStep}\n`;
-    if (it.draft) md += `   Draft: ${it.draft}\n`;
-    md += `\n`;
-  });
-  if (noise.length) {
-    md += `## Noise (archive candidates)\n`;
-    noise.forEach((it) => { md += `- ${it.who} (${it.network})\n`; });
+  const of = (f) => items.filter((i) => i.fate === f);
+  const n = (f) => of(f).length;
+  let md = `# beeper.chat triage · ${now.toLocaleString()}\n\n`;
+  md += `${items.length} conversations · ${n(FATE.QUICK)} quick · ${n(FATE.BLOCK)} blocked · `;
+  md += `${n(FATE.WAITING)} waiting · ${n(FATE.LET_GO)} let go · ${n(FATE.UNCLEAR)} unclear\n\n`;
+
+  for (const f of [FATE.BLOCK, FATE.QUICK, FATE.WAITING, FATE.UNCLEAR]) {
+    const rows = of(f);
+    if (!rows.length) continue;
+    md += `## ${FATE_LABEL[f]} (${rows.length})\n\n`;
+    rows.forEach((it, i) => {
+      md += `${i + 1}. [${it.score}] ${it.who} (${it.network})`;
+      if (it.daysWaiting) md += ` · ${it.daysWaiting}d waiting`;
+      if (it.calibrated) md += ` · calibrated`;
+      md += `\n`;
+      if (it.reason) md += `   Why: ${it.reason}\n`;
+      if (it.summary) md += `   ${it.summary}\n`;
+      if (f === FATE.BLOCK && it.deliverable) md += `   Deliverable: ${it.deliverable} (~${it.minutes || '?'} min)\n`;
+      if (it.nextStep) md += `   Next: ${it.nextStep}\n`;
+      if (it.draft) md += `   Draft: ${it.draft}\n`;
+      md += `\n`;
+    });
+  }
+  const letGo = of(FATE.LET_GO);
+  if (letGo.length) {
+    md += `## Let go (${letGo.length}) — no reply owed\n`;
+    letGo.forEach((it) => { md += `- ${it.who} (${it.network})${it.reason ? ` · ${it.reason}` : ''}\n`; });
   }
   return md;
 }
@@ -271,7 +373,31 @@ async function getRankedInbox() {
     if (LLM === 'api' && !ANTHROPIC_KEY) throw new Error('LLM=api needs ANTHROPIC_API_KEY (or use LLM=cli for your subscription).');
     const chats = await fetchInbox();
     progress.stage = 'ranking with claude';
-    const items = parseItems(await completeText(rankPrompt(chats), 4000));
+    const proposed = parseItems(await completeText(rankPrompt(chats), 4000));
+
+    // The model proposes, the calibration rules dispose. Deterministic chat
+    // physics (whose turn, group bursts, acks, mute) always win.
+    progress.stage = 'calibrating fates';
+    const byId = new Map(chats.map((c) => [c.id, c]));
+    const now = new Date();
+    const items = proposed.map((it) => {
+      const conv = byId.get(it.chatId);
+      if (!conv) return { ...it, fate: it.fate || FATE.UNCLEAR };
+      const { fate, reason, overridden, state } = assignFate(conv, it.fate, now);
+      const days = state.daysSinceLast || 0;
+      const ageBoost = Math.min(Math.floor(days / 7), 8);
+      const base = (Number(it.importance) || 3) * (Number(it.urgency) || 3);
+      return {
+        ...it, fate,
+        reason: overridden ? reason : (it.reason || reason || ''),
+        calibrated: overridden,
+        score: base + ageBoost, base, ageBoost,
+        daysWaiting: Math.round(days),
+        weight: relationshipWeight(conv, now),
+        // a fate that is not mine to answer must never carry a send-ready draft
+        draft: fate === FATE.LET_GO || fate === FATE.UNCLEAR ? '' : (it.draft || ''),
+      };
+    });
     items.sort((a, b) => (b.score || 0) - (a.score || 0));
     progress.stage = 'saving snapshot';
     return { demo: false, llm: LLM, items, snapshot: trySnapshot(items) };
@@ -330,6 +456,36 @@ async function handleChat(body) {
   const prompt = analyze && ctx ? analyzePrompt(messages, ctx) : chatPrompt(messages, ctx);
   const reply = (await completeText(prompt, analyze ? 4000 : 1500)).trim();
   return { reply };
+}
+
+// --- relationship radar: the thing email cannot do ---
+// Comprehensive sweep across every non-archived conversation, not just the
+// primary inbox. Cached, because this reads a lot of history.
+let radarCache = { at: 0, data: null };
+const RADAR_TTL = 10 * 60_000;
+
+async function getRadar({ force = false, limit = 400 } = {}) {
+  if (!force && radarCache.data && Date.now() - radarCache.at < RADAR_TTL) {
+    return { ...radarCache.data, cached: true };
+  }
+  if (DEMO || !BEEPER_TOKEN) return { goneQuietOn: [], unansweredAsks: [], moneyThreads: [], missedCommitments: [], demo: true };
+
+  progress.active = true;
+  try {
+    // no inbox filter = every conversation across every network
+    const convs = await fetchConversations({ inbox: '', limit, msgs: 25, stage: 'scanning relationships' });
+    progress.stage = 'building radar';
+    const data = buildRadar(convs, new Date(), { quietAfterDays: 5 });
+    const out = {
+      ...data,
+      scanned: convs.length,
+      builtAt: new Date().toISOString(),
+    };
+    radarCache = { at: Date.now(), data: out };
+    return out;
+  } finally {
+    progress.active = false; progress.stage = 'idle';
+  }
 }
 
 // --- global ask: one question, searched across every chat on every network ---
@@ -447,6 +603,9 @@ const server = createServer(async (req, res) => {
       if (!id) return send(res, 400, { error: 'missing id' });
       if (DEMO || !BEEPER_TOKEN) return send(res, 200, { transcript: '', count: 0, range: '', demo: true });
       return send(res, 200, await fullTranscript(id));
+    }
+    if (req.method === 'GET' && url.pathname === '/api/radar') {
+      return send(res, 200, await getRadar({ force: url.searchParams.get('force') === '1' }));
     }
     if (req.method === 'POST' && url.pathname === '/api/ask') return send(res, 200, await handleAsk(await readBody(req)));
     if (req.method === 'POST' && url.pathname === '/api/chat') return send(res, 200, await handleChat(await readBody(req)));
